@@ -2,10 +2,11 @@
 -- This module launches the plot server
 local modname = ...
 
-local plots = {}
+local plots = {}	-- To store the plot objects indexed by the IDs returned by the plotserver which point to the actual graphical plots handled by the plotserver
 local plotsmeta = {__mode="v"}
 setmetatable(plots,plotsmeta)	-- make plots a weak table for values to track which plots are garbage collected in the user script
-local createdPlots = {}
+local createdPlots = {}	-- To store list of plots created in the plotserver. The value is the index which points the GUI plot in the plot server
+-- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means the plot object is garbage collected and so it must be destroyed by the plotserver
 local plotObjectMeta = {}
 local require = require
 local math = math
@@ -54,7 +55,7 @@ if not server then
 	end
 	if not server then
 		package.loaded[modname] = nil
-		return
+		return	-- exit module without loading it
 	end
 end
 --print("Starting plotserver by passing port number=",port)
@@ -63,7 +64,7 @@ stat = plotserver:start(true)	-- Start plotserver in a independent non joinable 
 if not stat then
 	-- Could not start the plotserver as a new thread
 	package.loaded[modname] = nil
-	return
+	return	-- exit module without loading it
 end
 
 -- Now wait for the connection
@@ -77,7 +78,9 @@ if not conn then
 end
 conn:settimeout(2)
 
+-- Function to check if a plot object is garbage collected then ask plotserver to destroy it as well
 function garbageCollect()
+-- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means the plot object is garbage collected and so it must be destroyed by the plotserver
 	local i = 1
 --	print("CreatedPlots:")
 --	for k,v in pairs(createdPlots) do
@@ -96,7 +99,7 @@ function garbageCollect()
 			if sendMsg then
 				sendMsg = t2s.stringToTable(sendMsg)
 				if sendMsg and sendMsg[1] == "ACKNOWLEDGE" then
-					table.remove(createdPlots,i)
+					table.remove(createdPlots,i)	-- Destroyed successfully so remove from the plots list
 					inc = false
 				end
 			end			
@@ -224,7 +227,6 @@ function bodePlot(tbl)
 		return nil, "Expected table argument"
 	end
 	require "complex"
-
 
 	if not tbl.func or not(type(tbl.func) == "function") then
 		return nil, "Expected func key to contain a function in the table"

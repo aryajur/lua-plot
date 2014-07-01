@@ -1,5 +1,5 @@
 -- Plotserver.lua
--- This file is launched by iupx module to create a plotting server
+-- This file is launched by plot module to create a plotting server
 -- All plotting requests go to this file once launched using LuaSocket
 -- This allows user to have plots simultaneously with the lua interpreter 
 -- using the standard lua interpreter
