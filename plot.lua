@@ -174,6 +174,66 @@ function plotObjectMeta.__index(t,k)
 			end	
 			return true
 		end
+	elseif k == "Redraw" then
+		return function(plot)
+			garbageCollect()
+			local plotNum
+			for k,v in pairs(plots) do
+				if v == t then
+					plotNum = k
+					break
+				end
+			end
+			local sendMsg = {"REDRAW",plotNum}
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				return nil, "Cannot communicate with plot server"
+			end
+			sendMsg = conn:receive("*l")
+			if not sendMsg then
+				return nil, "No Acknowledgement from plot server"
+			end
+			sendMsg = t2s.stringToTable(sendMsg)
+			if not sendMsg then
+				return nil, "Plotserver not responding correctly"
+			end
+			if sendMsg[1] == "ERROR" then
+				return nil, "Plotserver lost the plot"
+			end
+			if sendMsg[1] ~= "ACKNOWLEDGE" then
+				return nil, "Plotserver not responding correctly"
+			end	
+			return true
+		end
+	elseif k=="Attributes" then
+		return function(plot,tbl)
+			garbageCollect()
+			local plotNum
+			for k,v in pairs(plots) do
+				if v==t then 
+					plotNum = k
+					break
+				end
+			end
+			local sendMsg = {"SET ATTRIBUTES",plotNum,tbl}
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				return nil, "Cannot communicate with plot server"
+			end
+			sendMsg = conn:receive("*l")
+			if not sendMsg then
+				return nil, "No Acknowledgement from plot server"
+			end
+			sendMsg = t2s.stringToTable(sendMsg)
+			if not sendMsg then
+				return nil, "Plotserver not responding correctly"
+			end
+			if sendMsg[1] == "ERROR" then
+				return nil, "Plotserver lost the plot"
+			end
+			if sendMsg[1] ~= "ACKNOWLEDGE" then
+				return nil, "Plotserver not responding correctly"
+			end	
+			return true		
+		end
 	end		-- if k == "AddSeries" then
 end
 
@@ -231,14 +291,13 @@ function bodePlot(tbl)
 	if not tbl.func or not(type(tbl.func) == "function") then
 		return nil, "Expected func key to contain a function in the table"
 	end
-	local func = tbl.func
 
 	local ini = tbl.ini or 0.01
 	local fin = 10*ini
 	local finfreq = tbl.finfreq or 1e6
 	local mag = {}
 	local phase = {}
-	local lg = func(math.i*ini)
+	local lg = tbl.func(math.i*ini)
 	mag[#mag+1] = {ini,20*math.log(math.abs(lg),10)}
 	phase[#phase+1] = {ini,180/math.pi*math.atan2(lg.i,lg.r)}
 	local magmax = mag[1][2]
@@ -246,40 +305,79 @@ function bodePlot(tbl)
 	local phasemax = phase[1][2]
 	local phasemin = phase[1][2]
 	local steps = tbl.steps or 50	-- 50 points per decade
-	repeat
+	local function addPoints(func,ini,fin,m,p,mmax,mmin,pmax,pmin)
+		-- Loop to calculate all points in the present decade starting from ini
+		local lg
 		for i=1,steps do
 			lg = func(math.i*(ini+i*(fin-ini)/steps))
-			mag[#mag+1] = {ini+i*(fin-ini)/steps,20*math.log(math.abs(lg),10)}
-			phase[#phase+1] = {ini+i*(fin-ini)/steps,180/math.pi*math.atan2(lg.i,lg.r)}
-			if mag[#mag][2]>magmax then
-				magmax = mag[#mag][2]
+			m[#m+1] = {ini+i*(fin-ini)/steps,20*math.log(math.abs(lg),10)}
+			p[#p+1] = {ini+i*(fin-ini)/steps,180/math.pi*math.atan2(lg.i,lg.r)}
+			if m[#m][2]>mmax then
+				mmax = m[#mag][2]
 			end
-			if phase[#phase][2] > phasemax then
-				phasemax=phase[#phase][2]
+			if p[#p][2] > pmax then
+				pmax=p[#p][2]
 			end
-			if mag[#mag][2]<magmin then
-				magmin = mag[#mag][2]
+			if m[#m][2]<mmin then
+				mmin = m[#m][2]
 			end
-			if phase[#phase][2] < phasemin then
-				phasemin=phase[#phase][2]
+			if p[#p][2] < pmin then
+				pmin=p[#p][2]
 			end
 			--print(i,mag[#mag][1],mag[#mag][2])
-		end
+		end	
+		return mmax,mmin,pmax,pmin
+	end
+	repeat
+		magmax,magmin,phasemax,phasemin = addPoints(tbl.func,ini,fin,mag,phase,magmax,magmin,phasemax,phasemin)
 		ini = fin
 		fin = ini*10
 		--print("fin=",fin,fin<=1e6)
 	until fin > finfreq
-	local magPlot = pplot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = magmax+20, AXS_YMIN=magmin-20}
-	local phasePlot = pplot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = phasemax+10, AXS_YMIN = phasemin-10}
+--	local magPlot = pplot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = magmax+20, AXS_YMIN=magmin-20}
+--	local phasePlot = pplot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = phasemax+10, AXS_YMIN = phasemin-10}
+	-- AXS_BOUNDS takes xmin,ymin,xmax,ymax
+	local magPlot = pplot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, magmin-20,finfreq,magmax+20}}
+	local phasePlot = pplot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, phasemin-10,finfreq,phasemax+10}}
 	magPlot:AddSeries(mag)
 	phasePlot:AddSeries(phase)
+	if tbl.legend then
+		magPlot:Attributes{DS_LEGEND = tbl.legend}
+		phasePlot:Attributes{DS_LEGEND = tbl.legend}
+	end
+	mag = nil
+	phase = nil
+	lg = nil
 	--plotmag:AddSeries({{0,0},{10,10},{20,30},{30,45}})
 	--return iup.vbox {plotmag,plotphase}
-	return {mag=magPlot,phase=phasePlot}
+	return {mag=magPlot,phase=phasePlot,
+		addplot = function(bp,func,legend)
+			if not func then
+				func = tbl.func
+			end
+			ini = tbl.ini or 0.01
+			fin = 10*ini
+			mag = {}
+			phase = {}
+			lg = func(math.i*ini)
+			mag[#mag+1] = {ini,20*math.log(math.abs(lg),10)}
+			phase[#phase+1] = {ini,180/math.pi*math.atan2(lg.i,lg.r)}
+			magmax = mag[1][2]
+			magmin = mag[1][2]
+			phasemax = phase[1][2]
+			phasemin = phase[1][2]
+			repeat
+				magmax,magmin,phasemax,phasemin = addPoints(func,ini,fin,mag,phase,magmax,magmin,phasemax,phasemin)
+				ini = fin
+				fin = ini*10
+				--print("fin=",fin,fin<=1e6)
+			until fin > finfreq
+			bp.mag:AddSeries(mag)
+			bp.phase:AddSeries(phase)
+			if legend then
+				bp.mag:Attributes{DS_LEGEND = legend}
+				bp.phase:Attributes{DS_LEGEND = legend}
+			end
+		end
+	}
 end
-
-
-
-
-
-

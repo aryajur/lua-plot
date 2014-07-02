@@ -11,7 +11,7 @@
 -- ADD DATA - Add data points to a plot
 -- SHOW PLOT- Display the plot on the screen
 -- REDRAW - Redraw the indicated plot
--- SET ATTRIBUTES - Set the plot attributes
+-- SET ATTRIBUTES - Set the plot attributes, 2nd index is the plot index, 3rd index contains the table of Attributes for the plot
 -- DESTROY - Command to mark a plot object for destruction
 -- LIST PLOTS - List all plot numbers and objects in memory
 
@@ -19,8 +19,8 @@
 -- It is a Lua table with the command/Response on index 1 followed by extra arguments on following indices
 
 -- SERVER RESPONSES
--- ACKNOWLEDGE
--- ERROR
+-- ACKNOWLEDGE - Command acknowledged and executed
+-- ERROR - Error followed by the error message
 
 socket = require("socket")	-- socket is used to communicate with the main program and detect when to shut down
 require("LuaMath")
@@ -30,9 +30,11 @@ local t2s = require("lua-plot.tableToString")
 
 local timer
 local client			-- client socket object connection to parent process
-local managedPlots = {}
-local plot2Dialog = {}
-local managedDialogs = {}
+local managedPlots = {}	-- table of plot objects with numeric keys incremented for each new plot. 
+						-- The plots may be removed from between if they are garbage collected in 
+						-- the parent and closed here without changing the indices of the other plots
+local plot2Dialog = {}	-- Mapping from the plot object to the dialog object it is contained in listed in managedDialogs
+local managedDialogs = {}	-- Table of created dialogs with numeric keys incremented for each new dialog
 local exitProg
 
 local function connectParent()
@@ -56,6 +58,7 @@ function pplot (tbl)
 		tbl.AXS_YMIN = t[2]
 		tbl.AXS_XMAX = t[3]
 		tbl.AXS_YMAX = t[4]
+		tbl.AXS_BOUNDS = nil
 	end
 
     -- the defaults for these values are too small, at least on my system!
@@ -198,6 +201,9 @@ local function setupTimer()
 							else
 								msg[3].title = "Plot "..tostring(msg[2])
 							end
+							if not msg[3].size then
+								msg[3].size = "HALFxHALF"
+							end
 						end
 						msg[3][1] = managedPlots[msg[2]]
 						managedDialogs[#managedDialogs + 1] = iup.dialog(msg[3])
@@ -267,6 +273,39 @@ local function setupTimer()
 						end
 					end
 				elseif msg[1] == "SET ATTRIBUTES" then
+					if managedPlots[msg[2]] then
+						if not msg[3] or type(msg[3])~="table" then
+							retmsg = [[{"ERROR","Expecting table of attributes for third parameter"}]].."\n"
+						end
+						if msg[3].AXS_BOUNDS then
+							local t = msg[3].AXS_BOUNDS
+							msg[3].AXS_XMIN = t[1]
+							msg[3].AXS_YMIN = t[2]
+							msg[3].AXS_XMAX = t[3]
+							msg[3].AXS_YMAX = t[4]
+							msg[3].AXS_BOUNDS = nil
+						end
+						-- mode must be set before any other attributes!
+						if msg[3].DS_MODE then
+							managedPlots[msg[2]].DS_MODE = msg[3].DS_MODE
+							msg[3].DS_MODE = nil
+						end
+						for k,v in pairs(msg[3]) do
+							managedPlots[msg[2]][k] = v
+						end
+						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
+					else
+						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
+					end
+					msg,err = client:send(retmsg)
+					if not msg then
+						if err == "closed" then
+							exitProg = true
+							iup.Close()
+						elseif err == "timeout" then
+							retry = retmsg
+						end
+					end
 				elseif msg[1] == "LIST PLOTS" then
 					print("Plotserver list:")
 					for k,v in pairs(managedPlots) do
