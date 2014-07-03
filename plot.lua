@@ -12,6 +12,15 @@ local table = table
 local print = print
 local getfenv = getfenv
 
+-- Set this to nil to use llthreads to launch plotserver as a thread
+local USE_PROCESS = true
+
+local osexecute
+
+if USE_PROCESS then
+	osexecute = os.execute
+end
+
 require("LuaMath")
 local llthreads = require("llthreads")
 local socket = require("socket")
@@ -78,13 +87,18 @@ if not server then
 	end
 end
 --print("Starting plotserver by passing port number=",port)
-local plotserver = llthreads.new(plotservercode, "PARENT PORT", port)
-stat = plotserver:start(true)	-- Start plotserver in a independent non joinable thread
-if not stat then
-	-- Could not start the plotserver as a new thread
-	package.loaded[modname] = nil
-	return	-- exit module without loading it
-end
+local plotserver
+if USE_PROCESS then
+	osexecute("lua LuaMath/lua-plot/launchPlotServer.lua")
+else
+	plotserver = llthreads.new(plotservercode, "PARENT PORT", port)
+	stat = plotserver:start(true)	-- Start plotserver in a independent non joinable thread
+	if not stat then
+		-- Could not start the plotserver as a new thread
+		package.loaded[modname] = nil
+		return	-- exit module without loading it
+	end
+end 
 
 -- Now wait for the connection
 server:settimeout(2)
