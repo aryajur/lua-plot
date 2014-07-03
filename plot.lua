@@ -2,12 +2,6 @@
 -- This module launches the plot server
 local modname = ...
 
-local plots = {}	-- To store the plot objects indexed by the IDs returned by the plotserver which point to the actual graphical plots handled by the plotserver
-local plotsmeta = {__mode="v"}
-setmetatable(plots,plotsmeta)	-- make plots a weak table for values to track which plots are garbage collected in the user script
-local createdPlots = {}	-- To store list of plots created in the plotserver. The value is the index which points the GUI plot in the plot server
--- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means the plot object is garbage collected and so it must be destroyed by the plotserver
-local plotObjectMeta = {}
 local require = require
 local math = math
 local setmetatable = setmetatable
@@ -22,6 +16,7 @@ require("LuaMath")
 local llthreads = require("llthreads")
 local socket = require("socket")
 local package = package
+local collectgarbage = collectgarbage
 
 local M = {} 
 package.loaded[modname] = M
@@ -31,12 +26,36 @@ else
 	_ENV = M
 end
 
+-- Plot objects
+local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
+					-- returned by the plotserver which point to the actual graphical plots handled by the plotserver
+local plotsmeta = {__mode="v"}
+setmetatable(plots,plotsmeta)	-- make plots a weak table for values to track which plots are garbage collected in the user script
+local createdPlots = {}	-- To store list of plots created in the plotserver. The value is the index which points the GUI plot object in the plot erver
+-- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means 
+		-- the plot object is garbage collected and so it must be destroyed by the plotserver
+		-- Which is what the garbageCollect function does
+local plotObjectMeta = {}
+
+-- Window objects for combining plots in one window
+local windows = {}	-- To store the window objects being handled here indexed by IDs
+					-- returned by the plotserver which point to the actual graphical windows handled by the plotserver
+local windowsmeta = {__mode="v"}
+setmetatable(windows,windowsmeta)	-- make windows a weak table for values to track which windows are garbage collected in the user script
+local createdWindows = {}	-- To store the list of windows created in the plotserver. The value is the index which points the GUI window object in the plotserver
+-- NOTE: if windows[ID] == nil but createdWindows has that ID in its list that means 
+		-- the window object is garbage collected and so it must be destroyed by the plotserver
+		-- Which is what the garbageCollect function does
+local windowObjectMeta = {}		-- Metatable to identify window objects
+
+
 local t2s = require("lua-plot.tableToString")
 
 -- Launch the plot server
 local port = 6348
 local plotservercode = [[
 	local args = {...}		-- arguments given by parent
+	-- Search for PARENT PORT number and store it in parentPort global variable
 	for i=1,#args,2 do
 		if args[i] == "PARENT PORT" and args[i+1] and type(args[i+1]) == "number" then
 			parentPort = args[i+1]
@@ -49,7 +68,7 @@ local server,stat,conn
 server = socket.bind("*",port)
 if not server then
 	-- Try the next 100 ports
-	while not server do
+	while not server and port<6348+100 do
 		port = port + 1
 		server = socket.bind("*",port)
 	end
@@ -76,11 +95,17 @@ if not conn then
 	package.loaded[modname] = nil
 	return
 end
-conn:settimeout(2)
+conn:settimeout(2)	-- connection object which is maintaining a link to the plotserver
 
 -- Function to check if a plot object is garbage collected then ask plotserver to destroy it as well
 function garbageCollect()
--- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means the plot object is garbage collected and so it must be destroyed by the plotserver
+	-- First run a garbage collection cycle
+	collectgarbage()
+-- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means 
+-- the plot object is garbage collected and so it must be destroyed by the plotserver
+-- NOTE: if windows[ID] == nil but createdWindows has that ID in its list that means 
+-- the window object is garbage collected and so it must be destroyed by the plotserver
+
 	local i = 1
 --	print("CreatedPlots:")
 --	for k,v in pairs(createdPlots) do
@@ -108,6 +133,172 @@ function garbageCollect()
 			i = i + 1
 		end
 	end
+	i = 1
+	-- Now do the same for windows
+	while i <= #createdWindows do
+		local inc = true
+		if not windows[createdWindows[i]] then
+			-- Ask plot server to destroy the window
+			--print("Destroy plot:",createdPlots[i])
+			local sendMsg = {"DESTROY WIN",createdWindows[i]}
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				return nil
+			end
+			sendMsg = conn:receive("*l")
+			if sendMsg then
+				sendMsg = t2s.stringToTable(sendMsg)
+				if sendMsg and sendMsg[1] == "ACKNOWLEDGE" then
+					table.remove(createdWindows,i)	-- Destroyed successfully so remove from the windows list
+					inc = false
+				end
+			end			
+		end
+		if inc then
+			i = i + 1
+		end
+	end
+end
+
+
+-- Plotserver should be running and the connection socket is establed with conn
+-- Now expose the API for windowing
+function windowObjectMeta.__index(t,k)
+	garbageCollect()
+
+	if k == "AddPlot" then
+		-- ADD PLOT - Add a plot to a slot in a window, 2nd index contains the window index, 3rd index contains the plot index, 
+			-- 4th index contains the coordinate table
+		return function (window,plot,coordinate)
+			garbageCollect()
+			local winNum
+			for k,v in pairs(windows) do
+				if v == t then
+					winNum = k
+					break
+				end
+			end
+			if not winNum then
+				return nil, "Could not find the associated window index"
+			end
+			local plotNum
+			for k,v in pairs(plots) do
+				if v == plot then
+					plotNum = k
+					break
+				end
+			end
+			if not plotNum then
+				return nil, "Could not find the associated plot index"
+			end
+			if not coordinate or type(coordinate) ~= "table" or not coordinate[1] or not coordinate[2] or type(coordinate[1]) ~= "number" or type(coordinate[2]) ~= "number" then
+				coordinate = nil
+			end
+			local sendMsg = {"ADD PLOT",winNum,plotNum,coordinate}
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				return nil, "Cannot communicate with plot server"
+			end
+			sendMsg = conn:receive("*l")
+			if not sendMsg then
+				return nil, "No Acknowledgement from plot server"
+			end
+			sendMsg = t2s.stringToTable(sendMsg)
+			if not sendMsg then
+				return nil, "Plotserver not responding correctly"
+			end
+			if sendMsg[1] == "ERROR" then
+				if sendMsg[2] == "Slot not available." then
+					return nil, "Slot not available or already occupied in the window"
+				elseif sendMsg[2] == "No Plot present at that index" then
+					return nil, "Plotserver lost the plot"
+				elseif sendMsg[2] == "No Window present at that index" then
+					return nil, "Plotserver lost the Window"
+				end
+			end
+			if sendMsg[1] ~= "ACKNOWLEDGE" then
+				return nil, "Plotserver not responding correctly"
+			end
+			return true			
+		end
+	elseif k == "Show" then
+		-- SHOW WINDOW - Display the window on screen, 2nd index is the index of the window object
+		return function(window)
+			garbageCollect()
+			local winNum
+			for k,v in pairs(windows) do
+				if v == t then
+					winNum = k
+					break
+				end
+			end
+			--print("Tell Server to show window number: "..winNum)
+			local sendMsg = {"SHOW WINDOW",winNum}
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				return nil, "Cannot communicate with plot server"
+			end
+			sendMsg = conn:receive("*l")
+			if not sendMsg then
+				return nil, "No Acknowledgement from plot server"
+			end
+			sendMsg = t2s.stringToTable(sendMsg)
+			if not sendMsg then
+				return nil, "Plotserver not responding correctly"
+			end
+			if sendMsg[1] == "ERROR" then
+				return nil, "Plotserver lost the window"
+			end
+			if sendMsg[1] ~= "ACKNOWLEDGE" then
+				return nil, "Plotserver not responding correctly"
+			end	
+			return true
+		end
+	elseif k == "ClearSlot" then
+		-- EMPTY SLOT - Command to empty a slot in the window, 2nd index is the window index, 3rd index is the coordinate table {row,col}
+		return function (window,coordinate)
+			garbageCollect()
+			local winNum
+			for k,v in pairs(windows) do
+				if v == t then
+					winNum = k
+					break
+				end
+			end
+			if not winNum then
+				return nil, "Could not find the associated window index"
+			end
+			if not coordinate or type(coordinate) ~= "table" or not coordinate[1] or not coordinate[2] or type(coordinate[1]) ~= "number" or type(coordinate[2]) ~= "number" then
+				return nil, "Second argument expected the coordinate of the slot to clear: {row,column}"
+			end
+			local sendMsg = {"EMPTY SLOT",winNum,coordinate}
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				return nil, "Cannot communicate with plot server"
+			end
+			sendMsg = conn:receive("*l")
+			if not sendMsg then
+				return nil, "No Acknowledgement from plot server"
+			end
+			sendMsg = t2s.stringToTable(sendMsg)
+			if not sendMsg then
+				return nil, "Plotserver not responding correctly"
+			end
+			if sendMsg[1] == "ERROR" then
+				if sendMsg[2] == "Slot not present." then
+					return nil, "Slot not present in the window"
+				elseif sendMsg[2] == "Expecting coordinate vector for slot to empty as the 3rd parameter" then
+					return nil, "Coordinate vector not correct"
+				elseif sendMsg[2] == "No Window present at that index" then
+					return nil, "Plotserver lost the Window"
+				end
+			end
+			if sendMsg[1] ~= "ACKNOWLEDGE" then
+				return nil, "Plotserver not responding correctly"
+			end
+			return true			
+		end	
+	end
+end
+
+function windowObjectMeta.__newindex(t,k)
+
 end
 
 -- Plotserver should be running and the connection socket is establed with conn
@@ -123,6 +314,9 @@ function plotObjectMeta.__index(t,k)
 					plotNum = k
 					break
 				end
+			end
+			if not plotNum then
+				return nil, "Could not find the associated plot index"
 			end
 			local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
 			if not conn:send(t2s.tableToString(sendMsg).."\n") then
@@ -241,6 +435,32 @@ function plotObjectMeta.__newindex(t,k,v)
 
 end
 
+function window(tbl)
+	garbageCollect()
+	local sendMsg = {"WINDOW",tbl}
+	if not conn:send(t2s.tableToString(sendMsg).."\n") then
+		return nil, "Cannot communicate with plot server"
+	end
+	sendMsg = conn:receive("*l")
+	if not sendMsg then
+		return nil, "No Acknowledgement from plot server"
+	end
+	sendMsg = t2s.stringToTable(sendMsg)
+	if not sendMsg then
+		return nil, "Plotserver not responding correctly"
+	end
+	if sendMsg[1] ~= "ACKNOWLEDGE" then
+		return nil, "Plotserver not responding correctly"
+	end
+	-- Create the plot reference object here
+	local newWin = {}
+	setmetatable(newWin,windowObjectMeta)
+	-- Put this in plots
+	windows[sendMsg[2]] = newWin
+	createdWindows[#createdWindows+1] = sendMsg[2]
+	return newWin
+end
+
 function pplot (tbl)
 	garbageCollect()
 	local sendMsg = {"PLOT",tbl}
@@ -268,8 +488,14 @@ function pplot (tbl)
 end
 
 function listPlots()
+	garbageCollect()
 	print("Local List:")
+	print("Plots:")
 	for k,v in pairs(plots) do
+		print(k,v)
+	end
+	print("Windows:")
+	for k,v in pairs(windows) do
 		print(k,v)
 	end
 	conn:send([[{"LIST PLOTS"}]].."\n")
