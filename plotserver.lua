@@ -57,6 +57,7 @@ local function connectParent()
 	-- Try opening the TCP server
 	local msg
 	local retmsg = {}
+	--print("Connecting to localhost on port",parentPort)
 	client,msg = socket.connect("localhost",parentPort)
 
 	if not client then
@@ -93,27 +94,10 @@ function window(tbl)
 		end
 	end
 	--[[
-	-- This has to be deleted in garbage collection
 	local dlgObject = winObj.dialog
 	function dlgObject:close_cb()
-		-- Detach all plots in it
-		for i = 1,#winObj.slots do
-			for k,v in pairs(winObj.slots[i]) do
-				iup.Detach(v)
-			end
-		end
-		local dlgIndex
-		for k,v in pairs(managedWindows) do
-			if v == dlgObject then
-				dlgIndex = k
-				break
-			end
-		end
-		iup.Destroy(dlgObject)
-		managedWindows[dlgIndex] = nil
 		return iup.IGNORE
-	end
-	]]
+	end]]
 	return winObj
 end
 
@@ -133,6 +117,10 @@ function pplot (tbl)
     if not tbl.MARGINBOTTOM then tbl.MARGINBOTTOM = 45 end
 	if not tbl.MARGINTOP then tbl.MARGINTOP = 45 end
 	if not tbl.MARGINRIGHT then tbl.MARGINRIGHT = 40 end
+	
+	-- Setting these 2 parameters allows axis to be shown even is the origin is not visible in the dataset area
+	if not tbl.AXS_XCROSSORIGIN then tbl.AXS_XCROSSORIGIN = "NO" end
+	if not tbl.AXS_YCROSSORIGIN then tbl.AXS_YCROSSORIGIN = "NO" end
 
     -- if we explicitly supply ranges, then auto must be switched off for that direction.
     if tbl.AXS_YMIN then tbl.AXS_YAUTOMIN = "NO" end
@@ -204,7 +192,7 @@ local function setupTimer()
 				for k,v in pairs(managedWindows) do
 					for n = 1,#v.slots do
 						for m,j in pairs(v.slots[n]) do
-							if j == managedPlots[msg[2]] then
+							if j == destroyQ[i] then
 								found = true
 								break
 							end
@@ -241,7 +229,9 @@ local function setupTimer()
 		if #destroyWinQ > 0 then
 			local i = 1
 			while i <= #destroyWinQ do
+				--print("#destroyWinQ: "..#destroyWinQ)
 				if destroyWinQ[i].dialog.visible == "NO" then
+					--print("destroying: "..tostring(destroyWinQ[i]))
 					-- first detach all the plots
 					for j = 1,#destroyWinQ[i].slots do
 						for k,v in pairs(destroyWinQ[i].slots[j]) do
@@ -255,8 +245,8 @@ local function setupTimer()
 							break
 						end
 					end
-					iup.Destroy(destroyWinQ[i].dialog)
-					managedWindows[dlgIndex] = nil					
+					--iup.Destroy(destroyWinQ[i].dialog)
+					managedWindows[dlgIndex] = nil	
 					table.remove(destroyWinQ,i)
 				else
 					i = i + 1
@@ -445,15 +435,18 @@ local function setupTimer()
 				elseif msg[1] == "WINDOW" then
 					-- Create a window and return the window index
 					if not msg[2] or not type(msg[2]) == "table" then
-						msg[2] = {title="Plot "..tostring(#managedWindows + 1),size="HALFxHALF"}
+						msg[2] = {title="Window "..tostring(#managedWindows + 1),size="HALFxHALF"}
 					else
 						if msg[2].title then
-							msg[2].title = "Plot "..tostring(#managedWindows + 1)..":"..msg[2].title
+							msg[2].title = "Window "..tostring(#managedWindows + 1)..":"..msg[2].title
 						else
-							msg[2].title = "Plot "..tostring(#managedWindows + 1)
+							msg[2].title = "Window "..tostring(#managedWindows + 1)
 						end
 						if not msg[2].size then
 							msg[2].size = "HALFxHALF"
+						end
+						if not msg[2][1] then
+							msg[2][1] = 1
 						end
 					end
 					managedWindows[#managedWindows + 1] = window(msg[2])
@@ -567,10 +560,11 @@ local function setupTimer()
 									iup.Detach(v)
 								end
 							end
+							-- print("Destroy window "..tostring(managedWindows[msg[2]].dialog))
 							iup.Destroy(managedWindows[msg[2]].dialog)
 							managedWindows[msg[2]] = nil					
 						else
-							destroyWinQ[#destroyQ + 1] = managedWindows[msg[2]]
+							destroyWinQ[#destroyWinQ + 1] = managedWindows[msg[2]]
 						end
 						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
 					else
@@ -620,6 +614,7 @@ local function setupTimer()
 						end
 					end
 				elseif msg[1] == "LIST PLOTS" then
+					collectgarbage()
 					print("Plotserver list:")
 					print("Plots:")
 					for k,v in pairs(managedPlots) do
