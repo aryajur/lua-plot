@@ -33,6 +33,8 @@ else
 	_ENV = M
 end
 
+_VERSION = "1.14.07.09"
+
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
 					-- returned by the plotserver which point to the actual graphical plots handled by the plotserver

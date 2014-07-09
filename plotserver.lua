@@ -93,6 +93,31 @@ function window(tbl)
 			winObj.dialog[k] = v
 		end
 	end
+	local dlgObject = winObj.dialog
+	function dlgObject:close_cb()
+		if winObj.DESTROY then
+			-- first detach all the plots
+			for j = 1,#winObj.slots do
+				for k,v in pairs(winObj.slots[j]) do
+					iup.Detach(v)
+				end
+			end
+			local dlgIndex
+			for k,v in pairs(managedWindows) do
+				if v == winObj then
+					dlgIndex = k
+					break
+				end
+			end
+			print("Now destroying "..tostring(dlgObject))
+			iup.Destroy(dlgObject)
+			managedWindows[dlgIndex] = nil	
+			print("destroyed "..tostring(dlgObject))
+		else
+			iup.Hide(dlgObject)
+		end
+		return iup.IGNORE
+	end
 	--[[
 	local dlgObject = winObj.dialog
 	function dlgObject:close_cb()
@@ -172,7 +197,6 @@ local function setupTimer()
 	timer = iup.timer{time = 10, run = "YES"}	-- run timer with every 10ms action
 	local retry
 	local destroyQ = {}
-	local destroyWinQ = {}
 	function timer:action_cb()
 		local err,retmsg
 --[[		if DBG then
@@ -225,34 +249,6 @@ local function setupTimer()
 				end
 			end
 		end		-- if #destroyQ > 0 then
-		-- Check if any windows in destroyWinQ and if they can be destroyed to free up memory
-		if #destroyWinQ > 0 then
-			local i = 1
-			while i <= #destroyWinQ do
-				--print("#destroyWinQ: "..#destroyWinQ)
-				if destroyWinQ[i].dialog.visible == "NO" then
-					--print("destroying: "..tostring(destroyWinQ[i]))
-					-- first detach all the plots
-					for j = 1,#destroyWinQ[i].slots do
-						for k,v in pairs(destroyWinQ[i].slots[j]) do
-							iup.Detach(v)
-						end
-					end
-					local dlgIndex
-					for k,v in pairs(managedWindows) do
-						if v == destroyWinQ[i] then
-							dlgIndex = k
-							break
-						end
-					end
-					--iup.Destroy(destroyWinQ[i].dialog)
-					managedWindows[dlgIndex] = nil	
-					table.remove(destroyWinQ,i)
-				else
-					i = i + 1
-				end
-			end		-- while i <= destroyQ do ends
-		end		-- if #destroyWinQ > 0 then ends
 		if retry then
 			msg,err = client:send(retry)
 			if not msg then
@@ -560,11 +556,11 @@ local function setupTimer()
 									iup.Detach(v)
 								end
 							end
-							-- print("Destroy window "..tostring(managedWindows[msg[2]].dialog))
+							print("Destroy window "..tostring(managedWindows[msg[2]].dialog))
 							iup.Destroy(managedWindows[msg[2]].dialog)
 							managedWindows[msg[2]] = nil					
 						else
-							destroyWinQ[#destroyWinQ + 1] = managedWindows[msg[2]]
+							managedWindows[msg[2]].DESTROY = true
 						end
 						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
 					else
