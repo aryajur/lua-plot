@@ -194,7 +194,7 @@ end
 -- Main function to launch the iup loop
 local function setupTimer()
 	-- Setup timer to run housekeeping
-	timer = iup.timer{time = 10, run = "YES"}	-- run timer with every 10ms action
+	timer = iup.timer{time = 10, run = "NO"}	-- run timer with every 10ms action
 	local retry
 	local destroyQ = {}
 	function timer:action_cb()
@@ -661,6 +661,7 @@ local function setupTimer()
 			print("Exit function")
 		end]]
 	end		-- function timer:action_cb() ends
+	timer.run = "YES"
 end
 
 --print("Starting plotserver")
