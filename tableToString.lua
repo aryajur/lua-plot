@@ -99,7 +99,7 @@ function stringToTable(str)
 	local f
 	local safeenv = {}
 	--print("STR2TAB str=",str)
-	if loadstring then
+	if loadstring and setfenv then
 		f = loadstring("return "..str)
 		setfenv(f,safeenv)
 	else
