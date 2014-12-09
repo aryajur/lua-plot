@@ -36,7 +36,9 @@
 socket = require("socket")	-- socket is used to communicate with the main program and detect when to shut down
 require("LuaMath")
 local iup = require("iuplua")
-require("iuplua_pplot")
+--require("iuplua_pplot")
+require("iupluacontrols")
+require("iuplua_plot")
 local t2s = require("lua-plot.tableToString")
 
 local timer
@@ -153,11 +155,11 @@ function pplot (tbl)
     if tbl.AXS_XMIN then tbl.AXS_XAUTOMIN = "NO" end
     if tbl.AXS_XMAX then tbl.AXS_XAUTOMAX = "NO" end
 
-    local plot = iup.pplot(tbl)
-    plot.End = iup.PPlotEnd
-    plot.Add = iup.PPlotAdd
+    local plot = iup.plot(tbl)
+    plot.End = iup.PlotEnd
+    plot.Add = iup.PlotAdd
     function plot.Begin ()
-        return iup.PPlotBegin(plot,0)
+        return iup.PlotBegin(plot,0)
     end
 
     function plot:AddSeries(xvalues,yvalues,options)
