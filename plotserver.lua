@@ -34,7 +34,6 @@
 -- ERROR - Error followed by the error message
 
 socket = require("socket")	-- socket is used to communicate with the main program and detect when to shut down
-require("LuaMath")
 local iup = require("iuplua")
 --require("iuplua_pplot")
 require("iupluacontrols")
@@ -129,7 +128,6 @@ function window(tbl)
 end
 
 function pplot (tbl)
-
 	if tbl.AXS_BOUNDS then
 		local t = tbl.AXS_BOUNDS
 		tbl.AXS_XMIN = t[1]
@@ -139,9 +137,9 @@ function pplot (tbl)
 		tbl.AXS_BOUNDS = nil
 	end
 
-    -- the defaults for these values are too small, at least on my system!
-    if not tbl.MARGINLEFT then tbl.MARGINLEFT = 40 end
-    if not tbl.MARGINBOTTOM then tbl.MARGINBOTTOM = 45 end
+	-- the defaults for these values are too small, at least on my system!
+	if not tbl.MARGINLEFT then tbl.MARGINLEFT = 40 end
+	if not tbl.MARGINBOTTOM then tbl.MARGINBOTTOM = 45 end
 	if not tbl.MARGINTOP then tbl.MARGINTOP = 45 end
 	if not tbl.MARGINRIGHT then tbl.MARGINRIGHT = 40 end
 	
@@ -149,11 +147,11 @@ function pplot (tbl)
 	if not tbl.AXS_XCROSSORIGIN then tbl.AXS_XCROSSORIGIN = "NO" end
 	if not tbl.AXS_YCROSSORIGIN then tbl.AXS_YCROSSORIGIN = "NO" end
 
-    -- if we explicitly supply ranges, then auto must be switched off for that direction.
-    if tbl.AXS_YMIN then tbl.AXS_YAUTOMIN = "NO" end
-    if tbl.AXS_YMAX then tbl.AXS_YAUTOMAX = "NO" end
-    if tbl.AXS_XMIN then tbl.AXS_XAUTOMIN = "NO" end
-    if tbl.AXS_XMAX then tbl.AXS_XAUTOMAX = "NO" end
+	-- if we explicitly supply ranges, then auto must be switched off for that direction.
+	if tbl.AXS_YMIN then tbl.AXS_YAUTOMIN = "NO" end
+	if tbl.AXS_YMAX then tbl.AXS_YAUTOMAX = "NO" end
+	if tbl.AXS_XMIN then tbl.AXS_XAUTOMIN = "NO" end
+	if tbl.AXS_XMAX then tbl.AXS_XAUTOMAX = "NO" end
 
     local plot = iup.plot(tbl)
     plot.End = iup.PlotEnd
@@ -256,6 +254,7 @@ local function setupTimer()
 			if not msg then
 				if err == "closed" then
 					exitProg = true
+					client:close()
 					iup.Close()
 				end
 			else
@@ -281,6 +280,7 @@ local function setupTimer()
 			if msg then
 				if msg[1] == "END" then
 					exitProg = true
+					client:close()
 					iup.Close()
 				elseif msg[1] == "PLOT" then
 					-- Create a plot and return the plot index
@@ -290,6 +290,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -307,6 +308,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -366,6 +368,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -382,6 +385,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -425,6 +429,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -453,6 +458,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -497,6 +503,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -526,6 +533,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -544,6 +552,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -572,6 +581,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -606,6 +616,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -632,6 +643,7 @@ local function setupTimer()
 					if not msg then
 						if err == "closed" then
 							exitProg = true
+							client:close()
 							iup.Close()
 						elseif err == "timeout" then
 							retry = retmsg
@@ -644,6 +656,7 @@ local function setupTimer()
 				if not msg then
 					if err == "closed" then
 						exitProg = true
+						client:close()
 						iup.Close()
 					elseif err == "timeout" then
 						retry = retmsg
@@ -653,6 +666,7 @@ local function setupTimer()
 		elseif err == "closed" then
 			-- Exit this program as well
 			exitProg = true
+			client:close()
 			iup.Close()
 		end
 --[[		if DBG then

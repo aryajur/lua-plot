@@ -16,7 +16,6 @@ local tostring = tostring
 -- Set this to nil to use llthreads to launch plotserver as a thread
 local USE_PROCESS
 
-require("LuaMath")
 local llthreads
 if not USE_PROCESS then
 	llthreads = require("llthreads")
@@ -33,7 +32,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.14.12.08"
+_VERSION = "1.14.12.09"
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
@@ -115,7 +114,7 @@ end
 conn:settimeout(2)	-- connection object which is maintaining a link to the plotserver
 
 -- Function to check if a plot object is garbage collected then ask plotserver to destroy it as well
-function garbageCollect()
+local function garbageCollect()
 	-- First run a garbage collection cycle
 	collectgarbage()
 -- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means 
@@ -179,279 +178,297 @@ end
 
 -- Plotserver should be running and the connection socket is establed with conn
 -- Now expose the API for windowing
-function windowObjectMeta.__index(t,k)
-	garbageCollect()
+-- Doing it this way prevents the object API to be overwritten
+do
+	local windowAPI = {}
+	-- Window object functions
 
-	if k == "AddPlot" then
-		-- ADD PLOT - Add a plot to a slot in a window, 2nd index contains the window index, 3rd index contains the plot index, 
-			-- 4th index contains the coordinate table
-		return function (window,plot,coordinate)
-			garbageCollect()
-			local winNum
-			for k,v in pairs(windows) do
-				if v == t then
-					winNum = k
-					break
-				end
+	-- ADD PLOT - Add a plot to a slot in a window, 2nd index contains the window index, 3rd index contains the plot index, 
+		-- 4th index contains the coordinate table
+	function windowAPI.AddPlot(window,plot,coordinate)
+		garbageCollect()
+		local winNum
+		-- Find the window object in windows to get the reference number to send to plotserver
+		for k,v in pairs(windows) do
+			if v == window then
+				winNum = k
+				break
 			end
-			if not winNum then
-				return nil, "Could not find the associated window index"
-			end
-			local plotNum
-			for k,v in pairs(plots) do
-				if v == plot then
-					plotNum = k
-					break
-				end
-			end
-			if not plotNum then
-				return nil, "Could not find the associated plot index"
-			end
-			if not coordinate or type(coordinate) ~= "table" or not coordinate[1] or not coordinate[2] or type(coordinate[1]) ~= "number" or type(coordinate[2]) ~= "number" then
-				coordinate = nil
-			end
-			local sendMsg = {"ADD PLOT",winNum,plotNum,coordinate}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
-				return nil, "Cannot communicate with plot server"
-			end
-			sendMsg = conn:receive("*l")
-			if not sendMsg then
-				return nil, "No Acknowledgement from plot server"
-			end
-			sendMsg = t2s.stringToTable(sendMsg)
-			if not sendMsg then
-				return nil, "Plotserver not responding correctly"
-			end
-			if sendMsg[1] == "ERROR" then
-				if sendMsg[2] == "Slot not available." then
-					return nil, "Slot not available or already occupied in the window"
-				elseif sendMsg[2] == "No Plot present at that index" then
-					return nil, "Plotserver lost the plot"
-				elseif sendMsg[2] == "No Window present at that index" then
-					return nil, "Plotserver lost the Window"
-				end
-			end
-			if sendMsg[1] ~= "ACKNOWLEDGE" then
-				return nil, "Plotserver not responding correctly"
-			end
-			return true			
 		end
-	elseif k == "Show" then
-		-- SHOW WINDOW - Display the window on screen, 2nd index is the index of the window object
-		return function(window)
-			garbageCollect()
-			local winNum
-			for k,v in pairs(windows) do
-				if v == t then
-					winNum = k
-					break
-				end
-			end
-			--print("Tell Server to show window number: "..winNum)
-			local sendMsg = {"SHOW WINDOW",winNum}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
-				return nil, "Cannot communicate with plot server"
-			end
-			sendMsg = conn:receive("*l")
-			if not sendMsg then
-				return nil, "No Acknowledgement from plot server"
-			end
-			sendMsg = t2s.stringToTable(sendMsg)
-			if not sendMsg then
-				return nil, "Plotserver not responding correctly"
-			end
-			if sendMsg[1] == "ERROR" then
-				return nil, "Plotserver lost the window"
-			end
-			if sendMsg[1] ~= "ACKNOWLEDGE" then
-				return nil, "Plotserver not responding correctly"
-			end	
-			return true
+		if not winNum then
+			return nil, "Could not find the associated window index"
 		end
-	elseif k == "ClearSlot" then
-		-- EMPTY SLOT - Command to empty a slot in the window, 2nd index is the window index, 3rd index is the coordinate table {row,col}
-		return function (window,coordinate)
-			garbageCollect()
-			local winNum
-			for k,v in pairs(windows) do
-				if v == t then
-					winNum = k
-					break
-				end
+		local plotNum
+		-- Find the plot object in plots to get the reference number to send to plotserver
+		for k,v in pairs(plots) do
+			if v == plot then
+				plotNum = k
+				break
 			end
-			if not winNum then
-				return nil, "Could not find the associated window index"
+		end
+		if not plotNum then
+			return nil, "Could not find the associated plot index"
+		end
+		if not coordinate or type(coordinate) ~= "table" or not coordinate[1] or not coordinate[2] or type(coordinate[1]) ~= "number" or type(coordinate[2]) ~= "number" then
+			coordinate = nil
+		end
+		local sendMsg = {"ADD PLOT",winNum,plotNum,coordinate}
+		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
+		end
+		sendMsg = conn:receive("*l")
+		if not sendMsg then
+			return nil, "No Acknowledgement from plot server"
+		end
+		sendMsg = t2s.stringToTable(sendMsg)
+		if not sendMsg then
+			return nil, "Plotserver not responding correctly"
+		end
+		if sendMsg[1] == "ERROR" then
+			if sendMsg[2] == "Slot not available." then
+				return nil, "Slot not available or already occupied in the window"
+			elseif sendMsg[2] == "No Plot present at that index" then
+				return nil, "Plotserver lost the plot"
+			elseif sendMsg[2] == "No Window present at that index" then
+				return nil, "Plotserver lost the Window"
 			end
-			if not coordinate or type(coordinate) ~= "table" or not coordinate[1] or not coordinate[2] or type(coordinate[1]) ~= "number" or type(coordinate[2]) ~= "number" then
-				return nil, "Second argument expected the coordinate of the slot to clear: {row,column}"
-			end
-			local sendMsg = {"EMPTY SLOT",winNum,coordinate}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
-				return nil, "Cannot communicate with plot server"
-			end
-			sendMsg = conn:receive("*l")
-			if not sendMsg then
-				return nil, "No Acknowledgement from plot server"
-			end
-			sendMsg = t2s.stringToTable(sendMsg)
-			if not sendMsg then
-				return nil, "Plotserver not responding correctly"
-			end
-			if sendMsg[1] == "ERROR" then
-				if sendMsg[2] == "Slot not present." then
-					return nil, "Slot not present in the window"
-				elseif sendMsg[2] == "Expecting coordinate vector for slot to empty as the 3rd parameter" then
-					return nil, "Coordinate vector not correct"
-				elseif sendMsg[2] == "No Window present at that index" then
-					return nil, "Plotserver lost the Window"
-				end
-			end
-			if sendMsg[1] ~= "ACKNOWLEDGE" then
-				return nil, "Plotserver not responding correctly"
-			end
-			return true			
-		end	
+		end
+		if sendMsg[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end
+		return true			
 	end
-end
+			
+	-- SHOW WINDOW - Display the window on screen, 2nd index is the index of the window object
+	function windowAPI.Show(window)
+		garbageCollect()
+		local winNum
+		-- Find the window object in windows to get the reference number to send to plotserver
+		for k,v in pairs(windows) do
+			if v == window then
+				winNum = k
+				break
+			end
+		end
+		--print("Tell Server to show window number: "..winNum)
+		local sendMsg = {"SHOW WINDOW",winNum}
+		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
+		end
+		sendMsg = conn:receive("*l")
+		if not sendMsg then
+			return nil, "No Acknowledgement from plot server"
+		end
+		sendMsg = t2s.stringToTable(sendMsg)
+		if not sendMsg then
+			return nil, "Plotserver not responding correctly"
+		end
+		if sendMsg[1] == "ERROR" then
+			return nil, "Plotserver lost the window"
+		end
+		if sendMsg[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end	
+		return true
+	end
+			
+	-- EMPTY SLOT - Command to empty a slot in the window, 2nd index is the window index, 3rd index is the coordinate table {row,col}
+	function windowAPI.ClearSlot(window,coordinate)
+		garbageCollect()
+		local winNum
+		-- Find the window object in windows to get the reference number to send to plotserver
+		for k,v in pairs(windows) do
+			if v == window then
+				winNum = k
+				break
+			end
+		end
+		if not winNum then
+			return nil, "Could not find the associated window index"
+		end
+		if not coordinate or type(coordinate) ~= "table" or not coordinate[1] or not coordinate[2] or type(coordinate[1]) ~= "number" or type(coordinate[2]) ~= "number" then
+			return nil, "Second argument expected the coordinate of the slot to clear: {row,column}"
+		end
+		local sendMsg = {"EMPTY SLOT",winNum,coordinate}
+		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
+		end
+		sendMsg = conn:receive("*l")
+		if not sendMsg then
+			return nil, "No Acknowledgement from plot server"
+		end
+		sendMsg = t2s.stringToTable(sendMsg)
+		if not sendMsg then
+			return nil, "Plotserver not responding correctly"
+		end
+		if sendMsg[1] == "ERROR" then
+			if sendMsg[2] == "Slot not present." then
+				return nil, "Slot not present in the window"
+			elseif sendMsg[2] == "Expecting coordinate vector for slot to empty as the 3rd parameter" then
+				return nil, "Coordinate vector not correct"
+			elseif sendMsg[2] == "No Window present at that index" then
+				return nil, "Plotserver lost the Window"
+			end
+		end
+		if sendMsg[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end
+		return true			
+	end	
 
-function windowObjectMeta.__newindex(t,k)
+	function windowObjectMeta.__index(t,k)
+		garbageCollect()
+		return windowAPI[k]
+	end
 
-end
+	function windowObjectMeta.__newindex(t,k)
+		-- Do nothing so the API is not overwritten
+	end
+	windowObjectMeta.__metatable = true
+end	-- local scope for the windowObjectMeta ends here
 
 -- Plotserver should be running and the connection socket is establed with conn
 -- Now expose the API for plotting
-function plotObjectMeta.__index(t,k)
-	garbageCollect()
-	if k == "AddSeries" then
-		return function (plot,xvalues,yvalues,options)
-			garbageCollect()
-			local plotNum
-			for k,v in pairs(plots) do
-				if v == t then
-					plotNum = k
-					break
-				end
+do
+	local plotAPI = {}
+	function plotAPI.AddSeries(plot,xvalues,yvalues,options)
+		garbageCollect()
+		local plotNum
+		-- Find the plot object in plots to get the reference number to send to plotserver
+		for k,v in pairs(plots) do
+			if v == plot then
+				plotNum = k
+				break
 			end
-			if not plotNum then
-				return nil, "Could not find the associated plot index"
-			end
-			local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
-				return nil, "Cannot communicate with plot server"
-			end
-			sendMsg = conn:receive("*l")
-			if not sendMsg then
-				return nil, "No Acknowledgement from plot server"
-			end
-			sendMsg = t2s.stringToTable(sendMsg)
-			if not sendMsg then
-				return nil, "Plotserver not responding correctly"
-			end
-			if sendMsg[1] == "ERROR" then
-				return nil, "Plotserver lost the plot"
-			end
-			if sendMsg[1] ~= "ACKNOWLEDGE" then
-				return nil, "Plotserver not responding correctly"
-			end
-			return true
 		end
-	elseif k == "Show" then
-		return function(plot,tbl)
-			garbageCollect()
-			local plotNum
-			for k,v in pairs(plots) do
-				if v == t then
-					plotNum = k
-					break
-				end
-			end
-			local sendMsg = {"SHOW PLOT",plotNum,tbl}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
-				return nil, "Cannot communicate with plot server"
-			end
-			sendMsg = conn:receive("*l")
-			if not sendMsg then
-				return nil, "No Acknowledgement from plot server"
-			end
-			sendMsg = t2s.stringToTable(sendMsg)
-			if not sendMsg then
-				return nil, "Plotserver not responding correctly"
-			end
-			if sendMsg[1] == "ERROR" then
-				return nil, "Plotserver lost the plot"
-			end
-			if sendMsg[1] ~= "ACKNOWLEDGE" then
-				return nil, "Plotserver not responding correctly"
-			end	
-			return true
+		if not plotNum then
+			return nil, "Could not find the associated plot index"
 		end
-	elseif k == "Redraw" then
-		return function(plot)
-			garbageCollect()
-			local plotNum
-			for k,v in pairs(plots) do
-				if v == t then
-					plotNum = k
-					break
-				end
-			end
-			local sendMsg = {"REDRAW",plotNum}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
-				return nil, "Cannot communicate with plot server"
-			end
-			sendMsg = conn:receive("*l")
-			if not sendMsg then
-				return nil, "No Acknowledgement from plot server"
-			end
-			sendMsg = t2s.stringToTable(sendMsg)
-			if not sendMsg then
-				return nil, "Plotserver not responding correctly"
-			end
-			if sendMsg[1] == "ERROR" then
-				return nil, "Plotserver lost the plot"
-			end
-			if sendMsg[1] ~= "ACKNOWLEDGE" then
-				return nil, "Plotserver not responding correctly"
-			end	
-			return true
+		local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
+		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
 		end
-	elseif k=="Attributes" then
-		return function(plot,tbl)
-			garbageCollect()
-			local plotNum
-			for k,v in pairs(plots) do
-				if v==t then 
-					plotNum = k
-					break
-				end
-			end
-			local sendMsg = {"SET ATTRIBUTES",plotNum,tbl}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
-				return nil, "Cannot communicate with plot server"
-			end
-			sendMsg = conn:receive("*l")
-			if not sendMsg then
-				return nil, "No Acknowledgement from plot server"
-			end
-			sendMsg = t2s.stringToTable(sendMsg)
-			if not sendMsg then
-				return nil, "Plotserver not responding correctly"
-			end
-			if sendMsg[1] == "ERROR" then
-				return nil, "Plotserver lost the plot"
-			end
-			if sendMsg[1] ~= "ACKNOWLEDGE" then
-				return nil, "Plotserver not responding correctly"
-			end	
-			return true		
+		sendMsg = conn:receive("*l")
+		if not sendMsg then
+			return nil, "No Acknowledgement from plot server"
 		end
-	end		-- if k == "AddSeries" then
-end
+		sendMsg = t2s.stringToTable(sendMsg)
+		if not sendMsg then
+			return nil, "Plotserver not responding correctly"
+		end
+		if sendMsg[1] == "ERROR" then
+			return nil, "Plotserver lost the plot"
+		end
+		if sendMsg[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end
+		return true
+	end
+			
+	function plotAPI.Show(plot,tbl)
+		garbageCollect()
+		local plotNum
+		-- Find the plot object in plots to get the reference number to send to plotserver
+		for k,v in pairs(plots) do
+			if v == plot then
+				plotNum = k
+				break
+			end
+		end
+		local sendMsg = {"SHOW PLOT",plotNum,tbl}
+		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
+		end
+		sendMsg = conn:receive("*l")
+		if not sendMsg then
+			return nil, "No Acknowledgement from plot server"
+		end
+		sendMsg = t2s.stringToTable(sendMsg)
+		if not sendMsg then
+			return nil, "Plotserver not responding correctly"
+		end
+		if sendMsg[1] == "ERROR" then
+			return nil, "Plotserver lost the plot"
+		end
+		if sendMsg[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end	
+		return true
+	end
+			
+	function plotAPI.Redraw(plot)
+		garbageCollect()
+		local plotNum
+		-- Find the plot object in plots to get the reference number to send to plotserver
+		for k,v in pairs(plots) do
+			if v == plot then
+				plotNum = k
+				break
+			end
+		end
+		local sendMsg = {"REDRAW",plotNum}
+		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
+		end
+		sendMsg = conn:receive("*l")
+		if not sendMsg then
+			return nil, "No Acknowledgement from plot server"
+		end
+		sendMsg = t2s.stringToTable(sendMsg)
+		if not sendMsg then
+			return nil, "Plotserver not responding correctly"
+		end
+		if sendMsg[1] == "ERROR" then
+			return nil, "Plotserver lost the plot"
+		end
+		if sendMsg[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end	
+		return true
+	end
+			
+	function plotAPI.Attributes(plot,tbl)
+		garbageCollect()
+		local plotNum
+		-- Find the plot object in plots to get the reference number to send to plotserver
+		for k,v in pairs(plots) do
+			if v==plot then 
+				plotNum = k
+				break
+			end
+		end
+		local sendMsg = {"SET ATTRIBUTES",plotNum,tbl}
+		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
+		end
+		sendMsg = conn:receive("*l")
+		if not sendMsg then
+			return nil, "No Acknowledgement from plot server"
+		end
+		sendMsg = t2s.stringToTable(sendMsg)
+		if not sendMsg then
+			return nil, "Plotserver not responding correctly"
+		end
+		if sendMsg[1] == "ERROR" then
+			return nil, "Plotserver lost the plot"
+		end
+		if sendMsg[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end	
+		return true		
+	end
+			
+	function plotObjectMeta.__index(t,k)
+		garbageCollect()
+		return plotAPI[k]
+	end
 
-function plotObjectMeta.__newindex(t,k,v)
-
-end
-
+	function plotObjectMeta.__newindex(t,k,v)
+		-- Do nothing to prevent the plot object API from being overwritten
+	end
+	plotObjectMeta.__metatable = true
+end	-- Local scope for plotObjectMeta ends here
+	
 function window(tbl)
 	garbageCollect()
 	local sendMsg = {"WINDOW",tbl}
@@ -478,8 +495,11 @@ function window(tbl)
 	return newWin
 end
 
-function pplot (tbl)
+function plot (tbl)
 	garbageCollect()
+	if not tbl then
+		return nil,"Need a the attributes table to create a plot"
+	end
 	local sendMsg = {"PLOT",tbl}
 	if not conn:send(t2s.tableToString(sendMsg).."\n") then
 		return nil, "Cannot communicate with plot server"
@@ -523,10 +543,10 @@ end
 -- .func = single parameter function of the complex frequency s from which the magnitude and phase can be computed
 -- .ini = starting frequency of the plot (default = 0.01)
 -- .finfreq = ending frequency of the plot (default = 1MHz)
--- .steps = number of steps per decade for the plot
+-- .steps = number of steps per decade for the plot (default=50)
 function bodePlot(tbl)
 	garbageCollect()
-	if type(tbl) ~= "table" then
+	if not tbl or type(tbl) ~= "table" then
 		return nil, "Expected table argument"
 	end
 	require "complex"
@@ -577,11 +597,11 @@ function bodePlot(tbl)
 		fin = ini*10
 		--print("fin=",fin,fin<=1e6)
 	until fin > finfreq
---	local magPlot = pplot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = magmax+20, AXS_YMIN=magmin-20}
---	local phasePlot = pplot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = phasemax+10, AXS_YMIN = phasemin-10}
+--	local magPlot = plot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = magmax+20, AXS_YMIN=magmin-20}
+--	local phasePlot = plot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_XMIN=tbl.ini or 0.01, AXS_YMAX = phasemax+10, AXS_YMIN = phasemin-10}
 	-- AXS_BOUNDS takes xmin,ymin,xmax,ymax
-	local magPlot = pplot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, magmin-20,finfreq,magmax+20}}
-	local phasePlot = pplot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, phasemin-10,finfreq,phasemax+10}}
+	local magPlot = plot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, magmin-20,finfreq,magmax+20}}
+	local phasePlot = plot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, phasemin-10,finfreq,phasemax+10}}
 	magPlot:AddSeries(mag)
 	phasePlot:AddSeries(phase)
 	if tbl.legend then
@@ -593,6 +613,7 @@ function bodePlot(tbl)
 	lg = nil
 	--plotmag:AddSeries({{0,0},{10,10},{20,30},{30,45}})
 	--return iup.vbox {plotmag,plotphase}
+	-- Return the bode plot object
 	return {mag=magPlot,phase=phasePlot,
 		addplot = function(bp,func,legend)
 			if not func then
