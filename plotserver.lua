@@ -113,7 +113,7 @@ function window(tbl)
 			print("Now destroying "..tostring(dlgObject))
 			iup.Destroy(dlgObject)
 			managedWindows[dlgIndex] = nil	
-			print("destroyed "..tostring(dlgObject))
+			--print("destroyed "..tostring(dlgObject))
 		else
 			iup.Hide(dlgObject)
 		end
@@ -567,7 +567,7 @@ local function setupTimer()
 									iup.Detach(v)
 								end
 							end
-							print("Destroy window "..tostring(managedWindows[msg[2]].dialog))
+							--print("Destroy window "..tostring(managedWindows[msg[2]].dialog))
 							iup.Destroy(managedWindows[msg[2]].dialog)
 							managedWindows[msg[2]] = nil					
 						else
@@ -689,6 +689,7 @@ if parentPort then
 		while not exitProg do
 			iup.MainLoop()
 		end
+		print("Ending plotserver")
 	else
 		--print("Connect Parent unsuccessful")
 	end

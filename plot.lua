@@ -639,8 +639,8 @@ function bodePlot(tbl)
 			bp.mag:AddSeries(mag)
 			bp.phase:AddSeries(phase)
 			if legend then
-				bp.mag:Attributes{DS_LEGEND = legend}
-				bp.phase:Attributes{DS_LEGEND = legend}
+				bp.mag:Attributes{DS_LEGEND = legend,AXS_XAUTOMIN="YES", AXS_XAUTOMAX="YES", AXS_YAUTOMIN="YES", AXS_YAUTOMAX="YES"}
+				bp.phase:Attributes{DS_LEGEND = legend,AXS_XAUTOMIN="YES", AXS_XAUTOMAX="YES", AXS_YAUTOMIN="YES", AXS_YAUTOMAX="YES"}
 			end
 		end
 	}
