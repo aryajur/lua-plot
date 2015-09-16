@@ -14,7 +14,7 @@ local getfenv = getfenv
 local tostring = tostring
 
 -- Set this to nil to use llthreads to launch plotserver as a thread
-local USE_PROCESS
+local USE_PROCESS = true
 
 local llthreads
 if not USE_PROCESS then
@@ -69,7 +69,6 @@ local plotservercode = [[
 			parentPort = args[i+1]
 		end
 	end
-	require("LuaMath")
 	require("lua-plot.plotserver")
 ]]
 local server,stat,conn
@@ -501,14 +500,17 @@ function plot (tbl)
 		return nil,"Need a the attributes table to create a plot"
 	end
 	local sendMsg = {"PLOT",tbl}
-	if not conn:send(t2s.tableToString(sendMsg).."\n") then
-		return nil, "Cannot communicate with plot server"
+	local err,msg = conn:send(t2s.tableToString(sendMsg).."\n")
+	print("Send plot command:",err,msg)
+	if not err then
+		return nil, "Cannot communicate with plot server:"..msg
 	end
-	sendMsg = conn:receive("*l")
-	if not sendMsg then
-		return nil, "No Acknowledgement from plot server"
+	err,msg = conn:receive("*l")
+	print("Message from plot server:",err,msg)
+	if not err then
+		return nil, "No Acknowledgement from plot server:"..msg
 	end
-	sendMsg = t2s.stringToTable(sendMsg)
+	sendMsg = t2s.stringToTable(err)
 	if not sendMsg then
 		return nil, "Plotserver not responding correctly"
 	end

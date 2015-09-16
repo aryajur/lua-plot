@@ -286,6 +286,7 @@ local function setupTimer()
 					-- Create a plot and return the plot index
 					managedPlots[#managedPlots + 1] = pplot(msg[2])
 					retmsg = [[{"ACKNOWLEDGE",]]..tostring(#managedPlots).."}\n"
+					print("Received Plot command. Send ACKNOWLEDGE")
 					msg,err = client:send(retmsg)
 					if not msg then
 						if err == "closed" then

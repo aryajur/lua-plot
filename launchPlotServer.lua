@@ -12,5 +12,4 @@ for i=1,#args,2 do
 end
 
 --print("plotserver is launched")
-require("LuaMath")
 require("lua-plot.plotserver")
