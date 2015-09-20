@@ -32,7 +32,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.14.12.09"
+_VERSION = "1.15.09.20"
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
@@ -85,7 +85,7 @@ if not server then
 		return	-- exit module without loading it
 	end
 end
-print("PLOT: Starting plotserver by passing port number=",port)
+--print("PLOT: Starting plotserver by passing port number=",port)
 local plotserver
 if not USE_PROCESS then
 	plotserver = llthreads.new(plotservercode, "PARENT PORT", port)
@@ -99,7 +99,7 @@ end
 
 -- Now wait for the connection
 if USE_PROCESS then
-	print("PLOT: Waiting for plotserver to connect on port ".. tostring(port))
+	--print("PLOT: Waiting for plotserver to connect on port ".. tostring(port))
 	server:settimeout(10)
 else
 	server:settimeout(2)
@@ -502,12 +502,12 @@ function plot (tbl)
 	end
 	local sendMsg = {"PLOT",tbl}
 	local err,msg = conn:send(t2s.tableToString(sendMsg).."\n")
-	print("PLOT: Send plot command:",err,msg)
+	--print("PLOT: Send plot command:",err,msg)
 	if not err then
 		return nil, "Cannot communicate with plot server:"..msg
 	end
 	err,msg = conn:receive("*l")
-	print("PLOT: Message from plot server:",err,msg)
+	--print("PLOT: Message from plot server:",err,msg)
 	if not err then
 		return nil, "No Acknowledgement from plot server:"..msg
 	end

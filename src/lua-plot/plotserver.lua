@@ -58,7 +58,7 @@ local function connectParent()
 	-- Try opening the TCP server
 	local msg
 	local retmsg = {}
-	print("PLOTSERVER: Connecting to localhost on port",parentPort)
+	--print("PLOTSERVER: Connecting to localhost on port",parentPort)
 	client,msg = socket.connect("localhost",parentPort)
 
 	if not client then
@@ -110,7 +110,7 @@ function window(tbl)
 					break
 				end
 			end
-			print("PLOTSERVER: Now destroying "..tostring(dlgObject))
+			--print("PLOTSERVER: Now destroying "..tostring(dlgObject))
 			iup.Destroy(dlgObject)
 			managedWindows[dlgIndex] = nil	
 			--print("PLOTSERVER: destroyed "..tostring(dlgObject))
@@ -286,7 +286,7 @@ local function setupTimer()
 					-- Create a plot and return the plot index
 					managedPlots[#managedPlots + 1] = pplot(msg[2])
 					retmsg = [[{"ACKNOWLEDGE",]]..tostring(#managedPlots).."}\n"
-					print("PLOTSERVER: Received Plot command. Send ACKNOWLEDGE")
+					--print("PLOTSERVER: Received Plot command. Send ACKNOWLEDGE")
 					msg,err = client:send(retmsg)
 					if not msg then
 						if err == "closed" then
@@ -681,18 +681,18 @@ local function setupTimer()
 	timer.run = "YES"
 end
 
-print("PLOTSERVER: Starting plotserver")
-print("PLOTSERVER: Parent Port number=",parentPort)
+--print("PLOTSERVER: Starting plotserver")
+--print("PLOTSERVER: Parent Port number=",parentPort)
 if parentPort then
 	if connectParent() then
 		setupTimer()
-		print("PLOTSERVER: Timer is setup. Now starting mainloop")
+		--print("PLOTSERVER: Timer is setup. Now starting mainloop")
 		while not exitProg do
 			iup.MainLoop()
 		end
-		print("PLOTSERVER: Ending plotserver")
+		--print("PLOTSERVER: Ending plotserver")
 	else
-		print("PLOTSERVER: Connect Parent unsuccessful")
+		--print("PLOTSERVER: Connect Parent unsuccessful")
 	end
 end 	-- if parentPort and port then ends
 
