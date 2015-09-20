@@ -58,7 +58,7 @@ local function connectParent()
 	-- Try opening the TCP server
 	local msg
 	local retmsg = {}
-	--print("Connecting to localhost on port",parentPort)
+	print("PLOTSERVER: Connecting to localhost on port",parentPort)
 	client,msg = socket.connect("localhost",parentPort)
 
 	if not client then
@@ -110,10 +110,10 @@ function window(tbl)
 					break
 				end
 			end
-			print("Now destroying "..tostring(dlgObject))
+			print("PLOTSERVER: Now destroying "..tostring(dlgObject))
 			iup.Destroy(dlgObject)
 			managedWindows[dlgIndex] = nil	
-			--print("destroyed "..tostring(dlgObject))
+			--print("PLOTSERVER: destroyed "..tostring(dlgObject))
 		else
 			iup.Hide(dlgObject)
 		end
@@ -200,8 +200,8 @@ local function setupTimer()
 	function timer:action_cb()
 		local err,retmsg
 --[[		if DBG then
-			print("Stop timer")
-			print("DBG: "..tostring(DBG))
+			print("PLOTSERVER: Stop timer")
+			print("PLOTSERVER: DBG: "..tostring(DBG))
 		end]]
 		timer.run = "NO"
 		-- Check if any plots in destroyQ and if they can be destroyed to free up memory
@@ -209,7 +209,7 @@ local function setupTimer()
 			local i = 1
 			while i<=#destroyQ do
 --[[				if DBG then
-					print("i is"..i)
+					print("PLOTSERVER: i is"..i)
 				end]]
 				-- check if the plot is not tied to any window
 				local found
@@ -230,8 +230,8 @@ local function setupTimer()
 					end
 				end
 				if not plot2Dialog[destroyQ[i]] and not found then
-					--print("Destroy Q length="..#destroyQ)
-					--print("Destroying object:"..tostring(destroyQ[i]))
+					--print("PLOTSERVER: Destroy Q length="..#destroyQ)
+					--print("PLOTSERVER: Destroying object:"..tostring(destroyQ[i]))
 					-- destroy the plot data
 					for k,v in pairs(managedPlots) do
 						if v == destroyQ[i] then
@@ -239,11 +239,11 @@ local function setupTimer()
 							break
 						end
 					end
-					--print("Destroying Plot:"..tostring(destroyQ[i]))
+					--print("PLOTSERVER: Destroying Plot:"..tostring(destroyQ[i]))
 					iup.Destroy(destroyQ[i])
 					--DBG = destroyQ[i]
 					table.remove(destroyQ,i)
-					--print("Both destroyed and entry removed from destroyQ. destroyQ length is now="..#destroyQ)
+					--print("PLOTSERVER: Both destroyed and entry removed from destroyQ. destroyQ length is now="..#destroyQ)
 				else
 					i = i + 1
 				end
@@ -265,17 +265,17 @@ local function setupTimer()
 			return
 		end
 --[[		if DBG then
-			print("Get message from parent")
-			print("DBG: "..tostring(DBG))
+			print("PLOTSERVER: Get message from parent")
+			print("PLOTSERVER: DBG: "..tostring(DBG))
 		end]]
 		-- Receive messages from Parent process if any
 		msg,err = client:receive("*l")
 		--[[if DBG and msg then
-			print("Message is:"..msg)
+			print("PLOTSERVER: Message is:"..msg)
 		end]]
 		if msg then
 			-- convert msg to table
-			--print(msg)
+			--print("PLOTSERVER: "..msg)
 			msg = t2s.stringToTable(msg)
 			if msg then
 				if msg[1] == "END" then
@@ -286,7 +286,7 @@ local function setupTimer()
 					-- Create a plot and return the plot index
 					managedPlots[#managedPlots + 1] = pplot(msg[2])
 					retmsg = [[{"ACKNOWLEDGE",]]..tostring(#managedPlots).."}\n"
-					print("Received Plot command. Send ACKNOWLEDGE")
+					print("PLOTSERVER: Received Plot command. Send ACKNOWLEDGE")
 					msg,err = client:send(retmsg)
 					if not msg then
 						if err == "closed" then
@@ -415,11 +415,11 @@ local function setupTimer()
 						-- destroy the plot data
 						if not plot2Dialog[managedPlots[msg[2]]] and not found then
 							-- Remove the plot
-							--print("Destroying plot: "..msg[2])
+							--print("PLOTSERVER: Destroying plot: "..msg[2])
 							iup.Destroy(managedPlots[msg[2]])
 							managedPlots[msg[2]] = nil
 						else
-							--print("Adding plot "..msg[2].." to destroyQ")
+							--print("PLOTSERVER: Adding plot "..msg[2].." to destroyQ")
 							destroyQ[#destroyQ + 1] = managedPlots[msg[2]]
 						end
 						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
@@ -568,7 +568,7 @@ local function setupTimer()
 									iup.Detach(v)
 								end
 							end
-							--print("Destroy window "..tostring(managedWindows[msg[2]].dialog))
+							--print("PLOTSERVER: Destroy window "..tostring(managedWindows[msg[2]].dialog))
 							iup.Destroy(managedWindows[msg[2]].dialog)
 							managedWindows[msg[2]] = nil					
 						else
@@ -625,16 +625,16 @@ local function setupTimer()
 					end
 				elseif msg[1] == "LIST PLOTS" then
 					collectgarbage()
-					print("Plotserver list:")
-					print("Plots:")
+					print("PLOTSERVER: Plotserver list:")
+					print("PLOTSERVER: Plots:")
 					for k,v in pairs(managedPlots) do
 						print(k,v)
 					end
-					print("Dialogs:")
+					print("PLOTSERVER: Dialogs:")
 					for k,v in pairs(managedDialogs) do
 						print(k,v)
 					end
-					print("Windows:")
+					print("PLOTSERVER: Windows:")
 					for k,v in pairs(managedWindows) do
 						print(k,v)
 					end
@@ -671,28 +671,28 @@ local function setupTimer()
 			iup.Close()
 		end
 --[[		if DBG then
-			print("restart timer")
+			print("PLOTSERVER: restart timer")
 		end]]
 		timer.run = "YES"
 --[[		if DBG then
-			print("Exit function")
+			print("PLOTSERVER: Exit function")
 		end]]
 	end		-- function timer:action_cb() ends
 	timer.run = "YES"
 end
 
---print("Starting plotserver")
---print("Parent Port number=",parentPort)
+print("PLOTSERVER: Starting plotserver")
+print("PLOTSERVER: Parent Port number=",parentPort)
 if parentPort then
 	if connectParent() then
 		setupTimer()
-		--print("Timer is setup. Now starting mainloop")
+		print("PLOTSERVER: Timer is setup. Now starting mainloop")
 		while not exitProg do
 			iup.MainLoop()
 		end
-		print("Ending plotserver")
+		print("PLOTSERVER: Ending plotserver")
 	else
-		--print("Connect Parent unsuccessful")
+		print("PLOTSERVER: Connect Parent unsuccessful")
 	end
 end 	-- if parentPort and port then ends
 

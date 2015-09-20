@@ -13,14 +13,7 @@ local print = print
 local getfenv = getfenv
 local tostring = tostring
 
--- Set this to nil to use llthreads to launch plotserver as a thread
-local USE_PROCESS = true
 
-local llthreads
-if not USE_PROCESS then
-	llthreads = require("llthreads")
-end
-local socket = require("socket")
 local package = package
 local collectgarbage = collectgarbage
 
@@ -29,10 +22,13 @@ package.loaded[modname] = M
 if setfenv then
 	setfenv(1,M)
 else
-	_ENV = M
+	_ENV = M	-- Lua 5.2+
 end
 
-_VERSION = "1.14.12.09"
+_VERSION = "1.15.09.18"
+
+local exec = require("tek.lib.exec")
+local t2s = require("lua-plot.tableToString")
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
@@ -56,61 +52,16 @@ local createdWindows = {}	-- To store the list of windows created in the plotser
 		-- Which is what the garbageCollect function does
 local windowObjectMeta = {}		-- Metatable to identify window objects
 
-
-local t2s = require("lua-plot.tableToString")
-
--- Launch the plot server
-local port = 6348
-local plotservercode = [[
-	local args = {...}		-- arguments given by parent
-	-- Search for PARENT PORT number and store it in parentPort global variable
-	for i=1,#args,2 do
-		if args[i] == "PARENT PORT" and args[i+1] and type(args[i+1]) == "number" then
-			parentPort = args[i+1]
-		end
-	end
-	require("lua-plot.plotserver")
-]]
-local server,stat,conn
-server = socket.bind("*",port)
-if not server then
-	-- Try the next 100 ports
-	while not server and port<6348+100 do
-		port = port + 1
-		server = socket.bind("*",port)
-	end
-	if not server then
-		package.loaded[modname] = nil
-		return	-- exit module without loading it
-	end
+-- Launch the plotthread
+local plotthreadfunc = function()
+	--require("lua-plot.plotthread")
+while true do
+	print("thread running")
+	
 end
---print("Starting plotserver by passing port number=",port)
-local plotserver
-if not USE_PROCESS then
-	plotserver = llthreads.new(plotservercode, "PARENT PORT", port)
-	stat = plotserver:start(true)	-- Start plotserver in a independent non joinable thread
-	if not stat then
-		-- Could not start the plotserver as a new thread
-		package.loaded[modname] = nil
-		return	-- exit module without loading it
-	end
 end
 
--- Now wait for the connection
-if USE_PROCESS then
-	print("Waiting for plotserver to connect on port ".. tostring(port))
-	server:settimeout(10)
-else
-	server:settimeout(2)
-end
-conn = server:accept()
-
-if not conn then
-	-- Did not get connection
-	package.loaded[modname] = nil
-	return
-end
-conn:settimeout(2)	-- connection object which is maintaining a link to the plotserver
+local plotthread = exec.run({taskname = "plotthread",func=plotthreadfunc})
 
 -- Function to check if a plot object is garbage collected then ask plotserver to destroy it as well
 local function garbageCollect()
@@ -132,10 +83,10 @@ local function garbageCollect()
 			-- Ask plot server to destroy the plot
 			--print("Destroy plot:",createdPlots[i])
 			local sendMsg = {"DESTROY",createdPlots[i]}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
 				return nil
 			end
-			sendMsg = conn:receive("*l")
+			sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 			if sendMsg then
 				sendMsg = t2s.stringToTable(sendMsg)
 				if sendMsg and sendMsg[1] == "ACKNOWLEDGE" then
@@ -156,10 +107,10 @@ local function garbageCollect()
 			-- Ask plot server to destroy the window
 			--print("Destroy plot:",createdPlots[i])
 			local sendMsg = {"DESTROY WIN",createdWindows[i]}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
 				return nil
 			end
-			sendMsg = conn:receive("*l")
+			sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 			if sendMsg then
 				sendMsg = t2s.stringToTable(sendMsg)
 				if sendMsg and sendMsg[1] == "ACKNOWLEDGE" then
@@ -175,10 +126,10 @@ local function garbageCollect()
 end
 
 
--- Plotserver should be running and the connection socket is establed with conn
+-- plotthread is running now
 -- Now expose the API for windowing
 -- Doing it this way prevents the object API to be overwritten
-do
+if not exitProg then
 	local windowAPI = {}
 	-- Window object functions
 
@@ -212,10 +163,10 @@ do
 			coordinate = nil
 		end
 		local sendMsg = {"ADD PLOT",winNum,plotNum,coordinate}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+			return nil
 		end
-		sendMsg = conn:receive("*l")
+		sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
@@ -251,10 +202,10 @@ do
 		end
 		--print("Tell Server to show window number: "..winNum)
 		local sendMsg = {"SHOW WINDOW",winNum}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+			return nil
 		end
-		sendMsg = conn:receive("*l")
+		sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
@@ -289,10 +240,10 @@ do
 			return nil, "Second argument expected the coordinate of the slot to clear: {row,column}"
 		end
 		local sendMsg = {"EMPTY SLOT",winNum,coordinate}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+			return nil
 		end
-		sendMsg = conn:receive("*l")
+		sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
@@ -324,11 +275,11 @@ do
 		-- Do nothing so the API is not overwritten
 	end
 	windowObjectMeta.__metatable = true
-end	-- local scope for the windowObjectMeta ends here
+end	-- if not exitProg then ends here
 
 -- Plotserver should be running and the connection socket is establed with conn
 -- Now expose the API for plotting
-do
+if not exitProg then
 	local plotAPI = {}
 	function plotAPI.AddSeries(plot,xvalues,yvalues,options)
 		garbageCollect()
@@ -344,10 +295,10 @@ do
 			return nil, "Could not find the associated plot index"
 		end
 		local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+			return nil
 		end
-		sendMsg = conn:receive("*l")
+		sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
@@ -375,10 +326,10 @@ do
 			end
 		end
 		local sendMsg = {"SHOW PLOT",plotNum,tbl}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+			return nil
 		end
-		sendMsg = conn:receive("*l")
+		sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
@@ -406,10 +357,10 @@ do
 			end
 		end
 		local sendMsg = {"REDRAW",plotNum}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+			return nil
 		end
-		sendMsg = conn:receive("*l")
+		sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
@@ -437,10 +388,10 @@ do
 			end
 		end
 		local sendMsg = {"SET ATTRIBUTES",plotNum,tbl}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+			return nil
 		end
-		sendMsg = conn:receive("*l")
+		sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
@@ -466,15 +417,15 @@ do
 		-- Do nothing to prevent the plot object API from being overwritten
 	end
 	plotObjectMeta.__metatable = true
-end	-- Local scope for plotObjectMeta ends here
+end	-- if not exitProg then ends here
 	
 function window(tbl)
 	garbageCollect()
 	local sendMsg = {"WINDOW",tbl}
-	if not conn:send(t2s.tableToString(sendMsg).."\n") then
-		return nil, "Cannot communicate with plot server"
+	if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+		return nil
 	end
-	sendMsg = conn:receive("*l")
+	sendMsg = exec.waitmsg(100)	-- 100 ms timeout
 	if not sendMsg then
 		return nil, "No Acknowledgement from plot server"
 	end
@@ -500,17 +451,15 @@ function plot (tbl)
 		return nil,"Need a the attributes table to create a plot"
 	end
 	local sendMsg = {"PLOT",tbl}
-	local err,msg = conn:send(t2s.tableToString(sendMsg).."\n")
-	print("Send plot command:",err,msg)
-	if not err then
-		return nil, "Cannot communicate with plot server:"..msg
+	if not plotthread:sendmsg(t2s.tableToString(sendMsg)) then
+		return nil
 	end
-	err,msg = conn:receive("*l")
-	print("Message from plot server:",err,msg)
-	if not err then
-		return nil, "No Acknowledgement from plot server:"..msg
+	sendMsg = exec.waitmsg(100)	-- 100 ms timeout
+	print("Message from plot server:",sendMsg)
+	if not sendMsg then
+		return nil, "No Acknowledgement from plot server"
 	end
-	sendMsg = t2s.stringToTable(err)
+	sendMsg = t2s.stringToTable(sendMsg)
 	if not sendMsg then
 		return nil, "Plotserver not responding correctly"
 	end
@@ -537,7 +486,7 @@ function listPlots()
 	for k,v in pairs(windows) do
 		print(k,v)
 	end
-	conn:send([[{"LIST PLOTS"}]].."\n")
+	linda:send("plotthread",{"LIST PLOTS"})
 end
 
 -- Function to return a Bode plot function
