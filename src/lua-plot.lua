@@ -32,7 +32,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.15.09.20"
+_VERSION = "1.15.09.21"
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
@@ -69,7 +69,35 @@ local plotservercode = [[
 			parentPort = math.floor(args[i+1])
 		end
 	end
-	require("subModSearcher")
+	-- Searcher for nested lua modules
+	package.searchers[#package.searchers + 1] = function(mod)
+		-- Check if this is a multi hierarchy module
+		if mod:find(".",1,true) then
+			-- Get the top most name 
+			local totErr = ""
+			local top = mod:sub(1,mod:find(".",1,true)-1)
+			local sep = package.config:match("(.-)%s")
+			local delim = package.config:match(".-%s+(.-)%s")
+			local subst = mod:gsub("%.",sep)
+			-- Now loop through all the lua module paths
+			for path in package.path:gmatch("(.-)"..delim) do
+				if path:sub(-5,-1) == "?.lua" then
+					path = path:sub(1,-6)..subst..".lua"
+				end
+				path = path:gsub("%?",top)
+				--print("Search at..."..path)
+				-- try loading this file
+				local f,err = loadfile(path)
+				if not f then
+					totErr = totErr.."\n\tno file '"..path.."'"
+				else
+					--print("FOUND")
+					return f
+				end
+			end
+			return totErr
+		end	
+	end
 	require("lua-plot.plotserver")
 ]]
 local server,stat,conn

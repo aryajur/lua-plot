@@ -1,5 +1,5 @@
 
-require("subModSearcher")
+--require("subModSearcher")
 
 -- Code to replace \.. in the paths to absolute paths so that Zerobrane debugging works
 local newPath
