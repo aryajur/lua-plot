@@ -305,8 +305,15 @@ local function setupTimer()
 					iup.Close()
 				elseif msg[1] == "PLOT" then
 					-- Create a plot and return the plot index
-					managedPlots[#managedPlots + 1] = pplot(msg[2])
-					retmsg = [[{"ACKNOWLEDGE",]]..tostring(#managedPlots).."}\n"
+					local i = 1
+					while true do
+						if not managedPlots[i] then
+							break
+						end
+						i = i + 1
+					end
+					managedPlots[i] = pplot(msg[2])
+					retmsg = [[{"ACKNOWLEDGE",]]..tostring(i).."}\n"
 					--print("PLOTSERVER: Received Plot command. Send ACKNOWLEDGE")
 					msg,err = client:send(retmsg)
 					if not msg then

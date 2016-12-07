@@ -151,10 +151,10 @@ local function garbageCollect()
 -- the window object is garbage collected and so it must be destroyed by the plotserver
 
 	local i = 1
---	print("PLOT: CreatedPlots:")
---	for k,v in pairs(createdPlots) do
---		print("PLOT: -->",k,v)
---	end
+	-- print("PLOT: CreatedPlots:")
+	-- for k,v in pairs(createdPlots) do
+		-- print("PLOT: -->",k,v)
+	-- end
 	while i <= #createdPlots do
 		local inc = true
 		if not plots[createdPlots[i]] then
