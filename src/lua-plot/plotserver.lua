@@ -161,15 +161,36 @@ function pplot (tbl)
     end
 
     function plot:AddSeries(xvalues,yvalues,options)
-        plot:Begin()
+		local str
         if type(xvalues[1]) == "table" then
             options = yvalues
+			if type(xvalues[1][1]) == "string" then
+				plot:Begin(1)
+				str = true
+			else
+				plot:Begin()
+			end
             for i,v in ipairs(xvalues) do
-                plot:Add(v[1],v[2])
+				if str then
+					plot:AddStr(v[1],v[2])
+				else
+					plot:Add(v[1],v[2])
+				end
             end
         else
+			if type(xvalues[1]) == "string" then
+				plot:Begin(1)
+				str = true
+			else
+				plot:Begin()
+			end
+			
             for i = 1,#xvalues do
-                plot:Add(xvalues[i],yvalues[i])
+				if str then
+					plot:AddStr(xvalues[i],yvalues[i])
+				else
+					plot:Add(xvalues[i],yvalues[i])
+				end
             end
         end
         plot:End()
@@ -341,7 +362,7 @@ local function setupTimer()
 							iup.SetFocus(dlgExists)
 						else
 							-- Create new Dialog to show the plot in
-							msg[3][1] = managedPlots[msg[2]]
+							msg[3][1] = iup.hbox{managedPlots[msg[2]]}
 							managedDialogs[#managedDialogs + 1] = iup.dialog(msg[3])
 							managedDialogs[#managedDialogs]:show()
 							plot2Dialog[msg[3][1]] =  managedDialogs[#managedDialogs]

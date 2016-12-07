@@ -32,7 +32,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.15.09.21"
+_VERSION = "1.16.12.06"
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
