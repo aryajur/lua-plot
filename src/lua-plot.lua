@@ -144,6 +144,10 @@ conn:settimeout(2)	-- connection object which is maintaining a link to the plots
 -- Function to check if a plot object is garbage collected then ask plotserver to destroy it as well
 local function garbageCollect()
 	-- First run a garbage collection cycle
+--	print("PLOT GB PRE: Plots:")
+--	for k,v in pairs(plots) do
+--		print(k,v)
+--	end
 	collectgarbage()
 -- NOTE: if plots[ID] == nil but createdPlots has that ID in its list that means 
 -- the plot object is garbage collected and so it must be destroyed by the plotserver
@@ -151,15 +155,15 @@ local function garbageCollect()
 -- the window object is garbage collected and so it must be destroyed by the plotserver
 
 	local i = 1
-	-- print("PLOT: CreatedPlots:")
-	-- for k,v in pairs(createdPlots) do
-		-- print("PLOT: -->",k,v)
-	-- end
+--	print("PLOT GB: CreatedPlots:")
+--	for k,v in pairs(createdPlots) do
+--		print("PLOT GB: -->",k,v,plots[createdPlots[i]])
+--	end
 	while i <= #createdPlots do
 		local inc = true
 		if not plots[createdPlots[i]] then
 			-- Ask plot server to destroy the plot
-			--print("PLOT: Destroy plot:",createdPlots[i])
+			print("PLOT: Destroy plot:",createdPlots[i])
 			local sendMsg = {"DESTROY",createdPlots[i]}
 			if not conn:send(t2s.tableToString(sendMsg).."\n") then
 				return nil

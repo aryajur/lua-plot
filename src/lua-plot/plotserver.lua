@@ -372,7 +372,8 @@ local function setupTimer()
 							msg[3][1] = iup.hbox{managedPlots[msg[2]]}
 							managedDialogs[#managedDialogs + 1] = iup.dialog(msg[3])
 							managedDialogs[#managedDialogs]:show()
-							plot2Dialog[msg[3][1]] =  managedDialogs[#managedDialogs]
+							--plot2Dialog[msg[3][1]] =  managedDialogs[#managedDialogs]
+							plot2Dialog[managedPlots[msg[2]]] =  managedDialogs[#managedDialogs]
 							local dlg = #managedDialogs
 							local dlgObject = managedDialogs[#managedDialogs]
 							function dlgObject:close_cb()
@@ -422,6 +423,11 @@ local function setupTimer()
 					end
 				elseif msg[1] == "DESTROY" then
 					if managedPlots[msg[2]] then
+--						print("PLOTSERVER: plot2dialog plots")
+--						for k,v in pairs(plot2Dialog) do
+--							print(k,v)
+--						end
+						print("DESTROY "..msg[2])
 						-- check if the plot is not tied to any window
 						local found
 						for k,v in pairs(managedWindows) do
@@ -443,11 +449,11 @@ local function setupTimer()
 						-- destroy the plot data
 						if not plot2Dialog[managedPlots[msg[2]]] and not found then
 							-- Remove the plot
-							--print("PLOTSERVER: Destroying plot: "..msg[2])
+							print("PLOTSERVER: Destroying plot: "..msg[2])
 							iup.Destroy(managedPlots[msg[2]])
 							managedPlots[msg[2]] = nil
 						else
-							--print("PLOTSERVER: Adding plot "..msg[2].." to destroyQ")
+							print("PLOTSERVER: Adding plot "..msg[2].." to destroyQ")
 							destroyQ[#destroyQ + 1] = managedPlots[msg[2]]
 						end
 						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
