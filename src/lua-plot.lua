@@ -18,7 +18,9 @@ local USE_PROCESS = nil
 
 local llthreads
 if not USE_PROCESS then
-	llthreads = require("llthreads")
+    local ok
+    ok, llthreads = pcall(require, "llthreads2")
+    if not ok then llthreads = require"llthreads" end
 end
 local socket = require("socket")
 local package = package
