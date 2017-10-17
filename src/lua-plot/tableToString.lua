@@ -7,6 +7,7 @@ local load = load
 local setfenv = setfenv
 local pcall = pcall
 local pairs = pairs
+local table = table
 
 local print = print
 
@@ -24,11 +25,14 @@ end
 -- Metatables not followed
 -- Unless key is a number it will be taken and converted to a string
 function tableToString(t)
+	-- local levels = 0
 	local rL = {cL = 1}	-- Table to track recursion into nested tables (cL = current recursion level)
 	rL[rL.cL] = {}
+	local result = {}
 	do
 		rL[rL.cL]._f,rL[rL.cL]._s,rL[rL.cL]._var = pairs(t)
-		rL[rL.cL].str = "{"
+		--result[#result + 1] =  "{\n"..string.rep("\t",levels+1)		
+		result[#result + 1] = "{"		-- Non pretty version
 		rL[rL.cL].t = t
 		while true do
 			local k,v = rL[rL.cL]._f(rL[rL.cL]._s,rL[rL.cL]._var)
@@ -37,20 +41,27 @@ function tableToString(t)
 				break
 			elseif not k then
 				-- go up in recursion level
-				if string.sub(rL[rL.cL].str,-1,-1) == "," then
-					rL[rL.cL].str = string.sub(rL[rL.cL].str,1,-2)
-				end
-				--print("GOING UP:     "..rL[rL.cL].str.."}")
-				rL[rL.cL-1].str = rL[rL.cL-1].str..rL[rL.cL].str.."}"
+				-- If condition for pretty printing
+				-- if result[#result]:sub(-1,-1) == "," then
+					-- result[#result] = result[#result]:sub(1,-3)	-- remove the tab and the comma
+				-- else
+					-- result[#result] = result[#result]:sub(1,-2)	-- just remove the tab
+				-- end
+				result[#result + 1] = "},"	-- non pretty version
+				-- levels = levels - 1
 				rL.cL = rL.cL - 1
 				rL[rL.cL+1] = nil
-				rL[rL.cL].str = rL[rL.cL].str..","
+				--rL[rL.cL].str = rL[rL.cL].str..",\n"..string.rep("\t",levels+1)
 			else
 				-- Handle the key and value here
 				if type(k) == "number" then
-					rL[rL.cL].str = rL[rL.cL].str.."["..tostring(k).."]="
+					result[#result + 1] = "["..tostring(k).."]="
 				else
-					rL[rL.cL].str = rL[rL.cL].str..tostring(k).."="
+					if k:match([["]]) then
+						result[#result + 1] = "["..[[']]..tostring(k)..[[']].."]="
+					else
+						result[#result + 1] = "["..[["]]..tostring(k)..[["]].."]="
+					end
 				end
 				if type(v) == "table" then
 					-- Check if this is not a recursive table
@@ -64,51 +75,51 @@ function tableToString(t)
 					end
 					if goDown then
 						-- Go deeper in recursion
+						-- levels = levels + 1
 						rL.cL = rL.cL + 1
 						rL[rL.cL] = {}
 						rL[rL.cL]._f,rL[rL.cL]._s,rL[rL.cL]._var = pairs(v)
-						rL[rL.cL].str = "{"
+						--result[#result + 1] = "{\n"..string.rep("\t",levels+1)
+						result[#result + 1] = "{"	-- non pretty version
 						rL[rL.cL].t = v
-						--print("GOING DOWN:",k)
 					else
-						rL[rL.cL].str = rL[rL.cL].str.."\""..tostring(v).."\""
-						rL[rL.cL].str = rL[rL.cL].str..","
-						--print(k,"=",v)
+						--result[#result + 1] = "\""..tostring(v).."\",\n"..string.rep("\t",levels+1)
+						result[#result + 1] = "\""..tostring(v).."\","	-- non pretty version
 					end
-				elseif type(v) == "number" then
-					rL[rL.cL].str = rL[rL.cL].str..tostring(v)
-					rL[rL.cL].str = rL[rL.cL].str..","
-					--print(k,"=",v)
+				elseif type(v) == "number" or type(v) == "boolean" then
+					--result[#result + 1] = tostring(v)..",\n"..string.rep("\t",levels+1)
+					result[#result + 1] = tostring(v)..","	-- non pretty version
 				else
-					rL[rL.cL].str = rL[rL.cL].str..string.format("%q",tostring(v))
-					rL[rL.cL].str = rL[rL.cL].str..","
-					--print(k,"=",v)
+					--result[#result + 1] = string.format("%q",tostring(v))..",\n"..string.rep("\t",levels+1)
+					result[#result + 1] = string.format("%q",tostring(v))..","	-- non pretty version
 				end		-- if type(v) == "table" then ends
 			end		-- if not rL[rL.cL]._var and rL.cL == 1 then ends
 		end		-- while true ends here
 	end		-- do ends
-	if string.sub(rL[rL.cL].str,-1,-1) == "," then
-		rL[rL.cL].str = string.sub(rL[rL.cL].str,1,-2)
-	end
-	rL[rL.cL].str = rL[rL.cL].str.."}"
-	return rL[rL.cL].str
-end
+	-- If condition for pretty printing
+	-- if result[#result]:sub(-1,-1) == "," then
+		-- result[#result] = result[#result]:sub(1,-3)	-- remove the tab and the comma
+	-- else
+		-- result[#result] = result[#result]:sub(1,-2)	-- just remove the tab
+	-- end
+	result[#result + 1] = "}"	-- non pretty version
+	return table.concat(result)end
 
 -- convert str to table
 function stringToTable(str)
-	local f
+  local fileFunc
 	local safeenv = {}
-	--print("STR2TAB str=",str)
-	if loadstring and setfenv then
-		f = loadstring("return "..str)
-		setfenv(f,safeenv)
-	else
-		f = load("return "..str,nil,"bt",safeenv)
+  if loadstring and setfenv then
+    fileFunc = loadstring("t="..str)
+    setfenv(f,safeenv)
+  else
+    fileFunc = load("t="..str,"stringToTable","t",safeenv)
+  end
+	local err,msg = pcall(fileFunc)
+	if not err or not safeenv.t or type(safeenv.t) ~= "table" then
+		return nil,msg or type(safeenv.t) ~= "table" and "Not a table"
 	end
-	local stat,tab
-	stat,tab = pcall(f)
-	if stat and tab and type(tab) == "table" then
-		return tab
-	end
+	return safeenv.t
 end
+
 

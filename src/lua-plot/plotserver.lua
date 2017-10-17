@@ -427,7 +427,7 @@ local function setupTimer()
 --						for k,v in pairs(plot2Dialog) do
 --							print(k,v)
 --						end
-						print("DESTROY "..msg[2])
+						--print("DESTROY "..msg[2])
 						-- check if the plot is not tied to any window
 						local found
 						for k,v in pairs(managedWindows) do
@@ -449,7 +449,7 @@ local function setupTimer()
 						-- destroy the plot data
 						if not plot2Dialog[managedPlots[msg[2]]] and not found then
 							-- Remove the plot
-							print("PLOTSERVER: Destroying plot: "..msg[2])
+							--print("PLOTSERVER: Destroying plot: "..msg[2])
 							iup.Destroy(managedPlots[msg[2]])
 							managedPlots[msg[2]] = nil
 						else

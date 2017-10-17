@@ -34,7 +34,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.16.12.06"
+_VERSION = "1.17.10.17"
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
@@ -165,7 +165,7 @@ local function garbageCollect()
 		local inc = true
 		if not plots[createdPlots[i]] then
 			-- Ask plot server to destroy the plot
-			print("PLOT: Destroy plot:",createdPlots[i])
+			--print("PLOT: Destroy plot:",createdPlots[i])
 			local sendMsg = {"DESTROY",createdPlots[i]}
 			if not conn:send(t2s.tableToString(sendMsg).."\n") then
 				return nil
