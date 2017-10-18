@@ -292,7 +292,7 @@ local function setupTimer()
 		-- Receive messages from Parent process if any
 		msg,err = client:receive("*l")
 		--[[if DBG and msg then
-			print("PLOTSERVER: Message is:"..msg)
+			print("PLOTSERVER: Message length is:", #msg)
 		end]]
 		if msg then
 			-- convert msg to table
@@ -326,9 +326,119 @@ local function setupTimer()
 						end
 					end
 				elseif msg[1] == "ADD DATA" then
+					--print("PLOTSERVER ADD DATA")
 					if managedPlots[msg[2]] then
+						-- Send Acknowledgement of command received
+						local data,nmsg
+--[=[						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
+						nmsg,err = client:send(retmsg)
+						if not nmsg then
+							if err == "closed" then
+								exitProg = true
+								client:close()
+								iup.Close()
+							elseif err == "timeout" then
+								retry = retmsg
+							end
+						end]=]
+						local to = client:gettimeout()
+						client:settimeout(2)	-- 2 second timeout
 						-- Add the data to the plot
-						managedPlots[msg[2]]:AddSeries(msg[3],msg[4],msg[5])
+						-- Checked whether this is a CHUNKED TRANSFER
+						if msg[4] then
+							-- This is chunked transfer
+							local numT = tonumber(msg[4])
+							data = {}
+							
+							for i = 1,numT-1 do
+								data[i],err = client:receive(CHUNKED_LIMIT)
+								if data[i] then
+--[=[									retmsg = [[{"ACKNOWLEDGE"}]].."\n"
+									nmsg,err = client:send(retmsg)
+									if not nmsg then
+										if err == "closed" then
+											exitProg = true
+											client:close()
+											iup.Close()
+										elseif err == "timeout" then
+											retry = retmsg
+										end
+									end]=]
+								else
+									--print("PLOTSERVER: receive error: "..err)
+									retmsg = [[{"ERROR","No Chunk Received"}]].."\n"
+									nmsg,err = client:send(retmsg)
+									if not nmsg then
+										if err == "closed" then
+											exitProg = true
+											client:close()
+											iup.Close()
+										elseif err == "timeout" then
+											retry = retmsg
+										end
+									end
+								end
+								--print("PLOTSERVER: CHUNKED TRANSFER number and size and total "..i.." "..#data[i].." "..numT)
+							end
+							-- Get the last transfer
+							data[#data+1],err = client:receive("*l")
+							--print("PLOTSERVER: CHUNKED TRANSFER number and size and total "..numT.." "..#data[#data].." "..numT)
+							if data[#data] then
+								-- convert msg to table
+								--print("PLOTSERVER: "..msg)
+								data = t2s.stringToTable(table.concat(data))
+								if not data then
+									retmsg = [[{"ERROR","Message not understood"}]].."\n"
+									msg,err = client:send(retmsg)
+									if not msg then
+										if err == "closed" then
+											exitProg = true
+											client:close()
+											iup.Close()
+										elseif err == "timeout" then
+											retry = retmsg
+										end
+									end
+								end
+							else
+								--print("PLOTSERVER: receive error (last): "..err)
+								retmsg = [[{"ERROR","No Chunk Received"}]].."\n"
+								nmsg,err = client:send(retmsg)
+								if not nmsg then
+									if err == "closed" then
+										exitProg = true
+										client:close()
+										iup.Close()
+									elseif err == "timeout" then
+										retry = retmsg
+									end
+								end
+							end
+						else
+							-- Just one transfer to get data
+							data,err = client:receive("*l")
+							if data then
+								-- convert msg to table
+								--print("PLOTSERVER: "..msg)
+								data = t2s.stringToTable(data)
+								if not data then
+									retmsg = [[{"ERROR","Message not understood"}]].."\n"
+									msg,err = client:send(retmsg)
+									if not msg then
+										if err == "closed" then
+											exitProg = true
+											client:close()
+											iup.Close()
+										elseif err == "timeout" then
+											retry = retmsg
+										end
+									end
+								end
+							end
+						end
+						client:settimeout(to)-- Set the timeout back to the default value
+						--print(#data[1],#data[2])
+						managedPlots[msg[2]]:AddSeries(data[1],data[2],msg[3])
 						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
@@ -453,7 +563,7 @@ local function setupTimer()
 							iup.Destroy(managedPlots[msg[2]])
 							managedPlots[msg[2]] = nil
 						else
-							print("PLOTSERVER: Adding plot "..msg[2].." to destroyQ")
+							--print("PLOTSERVER: Adding plot "..msg[2].." to destroyQ")
 							destroyQ[#destroyQ + 1] = managedPlots[msg[2]]
 						end
 						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
@@ -717,6 +827,7 @@ end
 
 --print("PLOTSERVER: Starting plotserver")
 --print("PLOTSERVER: Parent Port number=",parentPort)
+--print("PLOTSERVER: CHUNKED LIMIT is=",CHUNKED_LIMIT)
 if parentPort then
 	if connectParent() then
 		setupTimer()

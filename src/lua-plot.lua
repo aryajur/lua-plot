@@ -61,6 +61,8 @@ local windowObjectMeta = {}		-- Metatable to identify window objects
 
 local t2s = require("lua-plot.tableToString")
 
+CHUNKED_LIMIT = 50000
+
 -- Launch the plot server
 local port = 6348
 local plotservercode = [[
@@ -69,6 +71,9 @@ local plotservercode = [[
 	for i=1,#args,2 do
 		if args[i] == "PARENT PORT" and args[i+1] and type(args[i+1]) == "number" then
 			parentPort = math.floor(args[i+1])
+		end
+		if args[i] == "CHUNKED_LIMIT" and args[i+1] and type(args[i+1]) == "number" then
+			CHUNKED_LIMIT = math.floor(args[i+1])
 		end
 	end
 	-- Searcher for nested lua modules
@@ -118,7 +123,7 @@ end
 --print("PLOT: Starting plotserver by passing port number=",port)
 local plotserver
 if not USE_PROCESS then
-	plotserver = llthreads.new(plotservercode, "PARENT PORT", port)
+	plotserver = llthreads.new(plotservercode, "PARENT PORT", port, "CHUNKED_LIMIT",CHUNKED_LIMIT)
 	stat = plotserver:start(true)	-- Start plotserver in a independent non joinable thread
 	if not stat then
 		-- Could not start the plotserver as a new thread
@@ -378,24 +383,91 @@ do
 		if not plotNum then
 			return nil, "Could not find the associated plot index"
 		end
-		local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
-			return nil, "Cannot communicate with plot server"
+		function checkACK()
+			sendMsg = conn:receive("*l")
+			if not sendMsg then
+				return nil, "No Acknowledgement from plot server"
+			end
+			sendMsg = t2s.stringToTable(sendMsg)
+			if not sendMsg then
+				return nil, "Plotserver not responding correctly"
+			end
+			if sendMsg[1] == "ERROR" then
+				return nil, "Plotserver lost the plot"
+			end
+			if sendMsg[1] ~= "ACKNOWLEDGE" then
+				return nil, "Plotserver not responding correctly"
+			end
+			return true
 		end
-		sendMsg = conn:receive("*l")
-		if not sendMsg then
-			return nil, "No Acknowledgement from plot server"
+		
+		--local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
+		local sendMsg = {"ADD DATA",plotNum,options}
+		local sendData = {xvalues,yvalues}
+		-- If the data is large then it has to be sent in chunks
+		local send = t2s.tableToString(sendData).."\n"
+		local sendlen = #send
+		if sendlen > CHUNKED_LIMIT then
+			sendMsg[4] = math.modf(sendlen/CHUNKED_LIMIT + 1)
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				return nil, "Cannot communicate with plot server"
+			end
+			local to = conn:gettimeout()
+			conn:settimeout(2)	-- 2 second timeout
+--[[			local msg,err = checkACK()
+			if not msg then 
+				conn:settimeout(to)
+				return nil,err 
+			end]]
+			
+			local chunkpos = 1
+			while chunkpos <= sendlen do
+				local lim
+				if chunkpos + CHUNKED_LIMIT-1 > sendlen then
+					lim = sendlen
+				else
+					lim = chunkpos+CHUNKED_LIMIT-1
+				end
+				--print("Size of addseries message: "..#send:sub(chunkpos,lim))
+				if not conn:send(send:sub(chunkpos,lim)) then
+					conn:settimeout(to)
+					return nil, "Cannot communicate with plot server"
+				end
+--[[				local msg,err = checkACK()
+				if not msg then 
+					conn:settimeout(to)
+					return nil,err 
+				end]]
+				
+				chunkpos = lim + 1
+			end
+		else
+			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+				conn:settimeout(to)
+				return nil, "Cannot communicate with plot server"
+			end
+--[[			local msg,err = checkACK()
+			if not msg then 
+				conn:settimeout(to)
+				return nil,err 
+			end]]
+			
+			if not conn:send(send) then
+				conn:settimeout(to)
+				return nil, "Cannot communicate with plot server"
+			end
+--[[			local msg,err = checkACK()
+			if not msg then 
+				conn:settimeout(to)
+				return nil,err 
+			end]]
 		end
-		sendMsg = t2s.stringToTable(sendMsg)
-		if not sendMsg then
-			return nil, "Plotserver not responding correctly"
+		local msg,err = checkACK()
+		if not msg then 
+			conn:settimeout(to)
+			return nil,err 
 		end
-		if sendMsg[1] == "ERROR" then
-			return nil, "Plotserver lost the plot"
-		end
-		if sendMsg[1] ~= "ACKNOWLEDGE" then
-			return nil, "Plotserver not responding correctly"
-		end
+		conn:settimeout(to)
 		return true
 	end
 			
