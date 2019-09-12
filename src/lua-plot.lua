@@ -34,7 +34,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.17.10.17"
+_VERSION = "1.19.09.05"
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
@@ -137,10 +137,11 @@ if USE_PROCESS then
 	--print("PLOT: Waiting for plotserver to connect on port ".. tostring(port))
 	server:settimeout(10)
 else
-	server:settimeout(2)
+	server:settimeout(10)
 end
+--print("Waiting for server to connect...")
 conn = server:accept()
-
+--print("Connection object is ",conn)
 if not conn then
 	-- Did not get connection
 	package.loaded[modname] = nil
@@ -383,7 +384,7 @@ do
 		if not plotNum then
 			return nil, "Could not find the associated plot index"
 		end
-		function checkACK()
+		local function checkACK()
 			sendMsg = conn:receive("*l")
 			if not sendMsg then
 				return nil, "No Acknowledgement from plot server"
@@ -398,7 +399,7 @@ do
 			if sendMsg[1] ~= "ACKNOWLEDGE" then
 				return nil, "Plotserver not responding correctly"
 			end
-			return true
+			return sendMsg[2]	-- Return the dataset number
 		end
 		
 		--local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
@@ -468,7 +469,7 @@ do
 			return nil,err 
 		end
 		conn:settimeout(to)
-		return true
+		return msg	-- Return dataset number
 	end
 			
 	function plotAPI.Show(plot,tbl)

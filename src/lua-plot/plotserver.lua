@@ -38,6 +38,7 @@ local iup = require("iuplua")
 --require("iuplua_pplot")
 require("iupluacontrols")
 require("iuplua_plot")
+--print("All required")
 local t2s = require("lua-plot.tableToString")
 
 local timer
@@ -60,7 +61,7 @@ local function connectParent()
 	local retmsg = {}
 	--print("PLOTSERVER: Connecting to localhost on port",parentPort)
 	client,msg = socket.connect("localhost",parentPort)
-
+	--print("Client is ",client)
 	if not client then
 		return nil
 	end	-- if not client then
@@ -68,7 +69,7 @@ local function connectParent()
 	return true
 end
 
-function window(tbl)
+local function window(tbl)
 	local winObj = {}
 	winObj.rowBoxes = {}	-- To hold the hboxes for each row
 	winObj.colBoxes	= {}	-- To hold the hboxes for each slot
@@ -127,7 +128,7 @@ function window(tbl)
 	return winObj
 end
 
-function pplot (tbl)
+local function pplot (tbl)
 	if tbl.AXS_BOUNDS then
 		local t = tbl.AXS_BOUNDS
 		tbl.AXS_XMIN = t[1]
@@ -193,7 +194,7 @@ function pplot (tbl)
 				end
             end
         end
-        plot:End()
+        local ds = plot:End()
         -- set any series-specific plot attributes
         if options then
             -- mode must be set before any other attributes!
@@ -205,6 +206,7 @@ function pplot (tbl)
                 plot[k] = v
             end
         end
+		return ds
     end
     function plot:Redraw()
         plot.REDRAW='YES'
@@ -438,8 +440,8 @@ local function setupTimer()
 						end
 						client:settimeout(to)-- Set the timeout back to the default value
 						--print(#data[1],#data[2])
-						managedPlots[msg[2]]:AddSeries(data[1],data[2],msg[3])
-						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
+						local ds = managedPlots[msg[2]]:AddSeries(data[1],data[2],msg[3])
+						retmsg = [[{"ACKNOWLEDGE",]]..tostring(ds)..[[}]].."\n"
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
 					end
