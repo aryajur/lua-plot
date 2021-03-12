@@ -8,13 +8,13 @@ local setmetatable = setmetatable
 local type = type
 local pairs = pairs
 local table = table
-
+local assert = assert
 local print = print
 local getfenv = getfenv
 local tostring = tostring
 
 -- Set this to nil to use llthreads to launch plotserver as a thread
-local USE_PROCESS = nil
+local USE_PROCESS = USE_PROCESS
 
 local llthreads
 if not USE_PROCESS then
@@ -35,6 +35,13 @@ else
 end
 
 _VERSION = "1.19.09.05"
+
+-- To do
+--[[
+* Plot should use a known canvas so that drawing can be controlled better
+* Automatic margins and tick spacing to prevent tick number overlaps
+
+]]
 
 -- Plot objects
 local plots = {}	-- To store the plot objects being handled here indexed by the IDs 
@@ -59,7 +66,7 @@ local createdWindows = {}	-- To store the list of windows created in the plotser
 local windowObjectMeta = {}		-- Metatable to identify window objects
 
 
-local t2s = require("lua-plot.tableToString")
+local tu = require("tableUtils")
 
 CHUNKED_LIMIT = 50000
 
@@ -173,12 +180,12 @@ local function garbageCollect()
 			-- Ask plot server to destroy the plot
 			--print("PLOT: Destroy plot:",createdPlots[i])
 			local sendMsg = {"DESTROY",createdPlots[i]}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			if not conn:send(tu.t2s(sendMsg).."\n") then
 				return nil
 			end
 			sendMsg = conn:receive("*l")
 			if sendMsg then
-				sendMsg = t2s.stringToTable(sendMsg)
+				sendMsg = tu.s2t(sendMsg)
 				if sendMsg and sendMsg[1] == "ACKNOWLEDGE" then
 					table.remove(createdPlots,i)	-- Destroyed successfully so remove from the plots list
 					inc = false
@@ -197,12 +204,12 @@ local function garbageCollect()
 			-- Ask plot server to destroy the window
 			--print("PLOT: Destroy plot:",createdPlots[i])
 			local sendMsg = {"DESTROY WIN",createdWindows[i]}
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			if not conn:send(tu.t2s(sendMsg).."\n") then
 				return nil
 			end
 			sendMsg = conn:receive("*l")
 			if sendMsg then
-				sendMsg = t2s.stringToTable(sendMsg)
+				sendMsg = tu.s2t(sendMsg)
 				if sendMsg and sendMsg[1] == "ACKNOWLEDGE" then
 					table.remove(createdWindows,i)	-- Destroyed successfully so remove from the windows list
 					inc = false
@@ -253,14 +260,14 @@ do
 			coordinate = nil
 		end
 		local sendMsg = {"ADD PLOT",winNum,plotNum,coordinate}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+		if not conn:send(tu.t2s(sendMsg).."\n") then
 			return nil, "Cannot communicate with plot server"
 		end
 		sendMsg = conn:receive("*l")
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
-		sendMsg = t2s.stringToTable(sendMsg)
+		sendMsg = tu.s2t(sendMsg)
 		if not sendMsg then
 			return nil, "Plotserver not responding correctly"
 		end
@@ -292,14 +299,14 @@ do
 		end
 		--print("PLOT: Tell Server to show window number: "..winNum)
 		local sendMsg = {"SHOW WINDOW",winNum}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+		if not conn:send(tu.t2s(sendMsg).."\n") then
 			return nil, "Cannot communicate with plot server"
 		end
 		sendMsg = conn:receive("*l")
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
-		sendMsg = t2s.stringToTable(sendMsg)
+		sendMsg = tu.s2t(sendMsg)
 		if not sendMsg then
 			return nil, "Plotserver not responding correctly"
 		end
@@ -330,14 +337,14 @@ do
 			return nil, "Second argument expected the coordinate of the slot to clear: {row,column}"
 		end
 		local sendMsg = {"EMPTY SLOT",winNum,coordinate}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+		if not conn:send(tu.t2s(sendMsg).."\n") then
 			return nil, "Cannot communicate with plot server"
 		end
 		sendMsg = conn:receive("*l")
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
-		sendMsg = t2s.stringToTable(sendMsg)
+		sendMsg = tu.s2t(sendMsg)
 		if not sendMsg then
 			return nil, "Plotserver not responding correctly"
 		end
@@ -389,7 +396,7 @@ do
 			if not sendMsg then
 				return nil, "No Acknowledgement from plot server"
 			end
-			sendMsg = t2s.stringToTable(sendMsg)
+			sendMsg = tu.s2t(sendMsg)
 			if not sendMsg then
 				return nil, "Plotserver not responding correctly"
 			end
@@ -406,11 +413,11 @@ do
 		local sendMsg = {"ADD DATA",plotNum,options}
 		local sendData = {xvalues,yvalues}
 		-- If the data is large then it has to be sent in chunks
-		local send = t2s.tableToString(sendData).."\n"
+		local send = tu.t2s(sendData).."\n"
 		local sendlen = #send
 		if sendlen > CHUNKED_LIMIT then
 			sendMsg[4] = math.modf(sendlen/CHUNKED_LIMIT + 1)
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			if not conn:send(tu.t2s(sendMsg).."\n") then
 				return nil, "Cannot communicate with plot server"
 			end
 			local to = conn:gettimeout()
@@ -443,7 +450,7 @@ do
 				chunkpos = lim + 1
 			end
 		else
-			if not conn:send(t2s.tableToString(sendMsg).."\n") then
+			if not conn:send(tu.t2s(sendMsg).."\n") then
 				conn:settimeout(to)
 				return nil, "Cannot communicate with plot server"
 			end
@@ -483,14 +490,14 @@ do
 			end
 		end
 		local sendMsg = {"SHOW PLOT",plotNum,tbl}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+		if not conn:send(tu.t2s(sendMsg).."\n") then
 			return nil, "Cannot communicate with plot server"
 		end
 		sendMsg = conn:receive("*l")
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
-		sendMsg = t2s.stringToTable(sendMsg)
+		sendMsg = tu.s2t(sendMsg)
 		if not sendMsg then
 			return nil, "Plotserver not responding correctly"
 		end
@@ -514,14 +521,14 @@ do
 			end
 		end
 		local sendMsg = {"REDRAW",plotNum}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+		if not conn:send(tu.t2s(sendMsg).."\n") then
 			return nil, "Cannot communicate with plot server"
 		end
 		sendMsg = conn:receive("*l")
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
-		sendMsg = t2s.stringToTable(sendMsg)
+		sendMsg = tu.s2t(sendMsg)
 		if not sendMsg then
 			return nil, "Plotserver not responding correctly"
 		end
@@ -545,14 +552,14 @@ do
 			end
 		end
 		local sendMsg = {"SET ATTRIBUTES",plotNum,tbl}
-		if not conn:send(t2s.tableToString(sendMsg).."\n") then
+		if not conn:send(tu.t2s(sendMsg).."\n") then
 			return nil, "Cannot communicate with plot server"
 		end
 		sendMsg = conn:receive("*l")
 		if not sendMsg then
 			return nil, "No Acknowledgement from plot server"
 		end
-		sendMsg = t2s.stringToTable(sendMsg)
+		sendMsg = tu.s2t(sendMsg)
 		if not sendMsg then
 			return nil, "Plotserver not responding correctly"
 		end
@@ -579,14 +586,14 @@ end	-- Local scope for plotObjectMeta ends here
 function window(tbl)
 	garbageCollect()
 	local sendMsg = {"WINDOW",tbl}
-	if not conn:send(t2s.tableToString(sendMsg).."\n") then
+	if not conn:send(tu.t2s(sendMsg).."\n") then
 		return nil, "Cannot communicate with plot server"
 	end
 	sendMsg = conn:receive("*l")
 	if not sendMsg then
 		return nil, "No Acknowledgement from plot server"
 	end
-	sendMsg = t2s.stringToTable(sendMsg)
+	sendMsg = tu.s2t(sendMsg)
 	if not sendMsg then
 		return nil, "Plotserver not responding correctly"
 	end
@@ -608,23 +615,15 @@ function plot (tbl)
 		return nil,"Need a the attributes table to create a plot"
 	end
 	local sendMsg = {"PLOT",tbl}
-	local err,msg = conn:send(t2s.tableToString(sendMsg).."\n")
+	local err,msg = conn:send(tu.t2s(sendMsg).."\n")
 	--print("PLOT: Send plot command:",err,msg)
-	if not err then
-		return nil, "Cannot communicate with plot server:"..msg
-	end
+	assert(err,"Cannot communicate with plot server:"..(msg or ""))
 	err,msg = conn:receive("*l")
+	assert(err,"No Acknowledgement from plot server:"..(msg or ""))
 	--print("PLOT: Message from plot server:",err,msg)
-	if not err then
-		return nil, "No Acknowledgement from plot server:"..msg
-	end
-	sendMsg = t2s.stringToTable(err)
-	if not sendMsg then
-		return nil, "Plotserver not responding correctly"
-	end
-	if sendMsg[1] ~= "ACKNOWLEDGE" then
-		return nil, "Plotserver not responding correctly"
-	end
+	sendMsg = assert(tu.s2t(err),"Plotserver not responding correctly:"..err)
+	assert(sendMsg[1] ~= "ERROR", "Plotserver Error: "..sendMsg[2])
+	assert(sendMsg[1] == "ACKNOWLEDGE","Plotserver not responding correctly:"..sendMsg[1])
 	-- Create the plot reference object here
 	local newPlot = {}
 	setmetatable(newPlot,plotObjectMeta)
@@ -672,6 +671,9 @@ function bodePlot(tbl)
 	local phase = {}
 	local lg = tbl.func(math.i*ini)
 	mag[#mag+1] = {ini,20*math.log(math.abs(lg),10)}
+	if math.abs(mag[#mag][2]) == math.huge then
+		mag[#mag][2] = 0
+	end	
 	phase[#phase+1] = {ini,180/math.pi*math.atan2(lg.i,lg.r)}
 	local magmax = mag[1][2]
 	local magmin = mag[1][2]
@@ -685,6 +687,10 @@ function bodePlot(tbl)
 			lg = func(math.i*(ini+i*(fin-ini)/steps))
 			m[#m+1] = {ini+i*(fin-ini)/steps,20*math.log(math.abs(lg),10)}
 			p[#p+1] = {ini+i*(fin-ini)/steps,180/math.pi*math.atan2(lg.i,lg.r)}
+			if math.abs(m[#m][2]) == math.huge then
+				m[#m][2] = mmin
+			end
+			--print(m[#m][2],lg,lg~=0)
 			if m[#m][2]>mmax then
 				mmax = m[#mag][2]
 			end

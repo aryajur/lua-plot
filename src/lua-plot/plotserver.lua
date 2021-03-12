@@ -33,13 +33,12 @@
 -- ACKNOWLEDGE - Command acknowledged and executed
 -- ERROR - Error followed by the error message
 
-socket = require("socket")	-- socket is used to communicate with the main program and detect when to shut down
 local iup = require("iuplua")
 --require("iuplua_pplot")
 require("iupluacontrols")
 require("iuplua_plot")
 --print("All required")
-local t2s = require("lua-plot.tableToString")
+local tu = require("tableUtils")
 
 local timer
 local client			-- client socket object connection to parent process
@@ -60,6 +59,7 @@ local function connectParent()
 	local msg
 	local retmsg = {}
 	--print("PLOTSERVER: Connecting to localhost on port",parentPort)
+	local socket = require("socket")	-- socket is used to communicate with the main program and detect when to shut down
 	client,msg = socket.connect("localhost",parentPort)
 	--print("Client is ",client)
 	if not client then
@@ -139,11 +139,12 @@ local function pplot (tbl)
 	end
 
 	-- the defaults for these values are too small, at least on my system!
+	--[[
 	if not tbl.MARGINLEFT then tbl.MARGINLEFT = 40 end
 	if not tbl.MARGINBOTTOM then tbl.MARGINBOTTOM = 45 end
 	if not tbl.MARGINTOP then tbl.MARGINTOP = 45 end
 	if not tbl.MARGINRIGHT then tbl.MARGINRIGHT = 40 end
-	
+	]]
 	-- Setting these 2 parameters allows axis to be shown even is the origin is not visible in the dataset area
 	if not tbl.AXS_XCROSSORIGIN then tbl.AXS_XCROSSORIGIN = "NO" end
 	if not tbl.AXS_YCROSSORIGIN then tbl.AXS_YCROSSORIGIN = "NO" end
@@ -162,7 +163,7 @@ local function pplot (tbl)
     end
 
     function plot:AddSeries(xvalues,yvalues,options)
-		local str
+		local str,newS
         if type(xvalues[1]) == "table" then
             options = yvalues
 			if type(xvalues[1][1]) == "string" then
@@ -172,10 +173,19 @@ local function pplot (tbl)
 				plot:Begin()
 			end
             for i,v in ipairs(xvalues) do
-				if str then
-					plot:AddStr(v[1],v[2])
+				if not v[2] then
+					newS = true	-- Start a new segment with the next sample
 				else
-					plot:Add(v[1],v[2])
+					if str then
+						plot:AddStr(v[1],v[2])
+					else
+						if newS then
+							plot:AddSegment(v[1],v[2])
+							newS = nil
+						else
+							plot:Add(v[1],v[2])
+						end
+					end
 				end
             end
         else
@@ -187,10 +197,19 @@ local function pplot (tbl)
 			end
 			
             for i = 1,#xvalues do
-				if str then
-					plot:AddStr(xvalues[i],yvalues[i])
+				if not yvalues[i] then
+					newS = true	-- Start a new segment with the next sample
 				else
-					plot:Add(xvalues[i],yvalues[i])
+					if str then
+						plot:AddStr(xvalues[i],yvalues[i])
+					else
+						if newS then
+							plot:AddSegment(xvalues[i],yvalues[i])
+							newS = nil
+						else
+							plot:Add(xvalues[i],yvalues[i])
+						end
+					end
 				end
             end
         end
@@ -208,6 +227,35 @@ local function pplot (tbl)
         end
 		return ds
     end
+	function plot:Attributes(attr)
+		if attr.AXS_BOUNDS then
+			local t = msg[3].AXS_BOUNDS
+			attr.AXS_XMIN = t[1]
+			attr.AXS_YMIN = t[2]
+			attr.AXS_XMAX = t[3]
+			attr.AXS_YMAX = t[4]
+			attr.AXS_BOUNDS = nil
+			attr.AXS_YAUTOMIN = "NO"
+			attr.AXS_XAUTOMIN = "NO"
+			attr.AXS_YAUTOMAX = "NO"
+			attr.AXS_XAUTOMAX = "NO"
+		else
+			if attr.AXS_YMIN then attr.AXS_YAUTOMIN = "NO" end
+			if attr.AXS_YMAX then attr.AXS_YAUTOMAX = "NO" end
+			if attr.AXS_XMIN then attr.AXS_XAUTOMIN = "NO" end
+			if attr.AXS_XMAX then attr.AXS_XAUTOMAX = "NO" end
+		end
+		-- mode must be set before any other attributes!
+		if attr.DS_MODE then
+			plot.DS_MODE = attr.DS_MODE
+			attr.DS_MODE = nil
+		end
+		for k,v in pairs(attr) do
+			plot[k] = v
+		end		
+		return true
+	end
+	
     function plot:Redraw()
         plot.REDRAW='YES'
     end
@@ -220,6 +268,20 @@ local function setupTimer()
 	timer = iup.timer{time = 10, run = "NO"}	-- run timer with every 10ms action
 	local retry
 	local destroyQ = {}
+	local function sendMSG(retmsg)
+		local msg,err = client:send(retmsg)
+		if not msg then
+			if err == "closed" then
+				exitProg = true
+				client:close()
+				iup.Close()
+			elseif err == "timeout" then
+				retry = retmsg
+				return nil
+			end
+		end		
+		return true
+	end
 	function timer:action_cb()
 		local err,retmsg
 --[[		if DBG then
@@ -273,15 +335,7 @@ local function setupTimer()
 			end
 		end		-- if #destroyQ > 0 then
 		if retry then
-			msg,err = client:send(retry)
-			if not msg then
-				if err == "closed" then
-					exitProg = true
-					client:close()
-					iup.Close()
-				end
-			else
-				-- message sent successfully
+			if not sendMSG(retry) then
 				retry = nil
 			end
 			timer.run = "YES"
@@ -299,7 +353,7 @@ local function setupTimer()
 		if msg then
 			-- convert msg to table
 			--print("PLOTSERVER: "..msg)
-			msg = t2s.stringToTable(msg)
+			msg = tu.s2t(msg)
 			if msg then
 				if msg[1] == "END" then
 					exitProg = true
@@ -317,16 +371,7 @@ local function setupTimer()
 					managedPlots[i] = pplot(msg[2])
 					retmsg = [[{"ACKNOWLEDGE",]]..tostring(i).."}\n"
 					--print("PLOTSERVER: Received Plot command. Send ACKNOWLEDGE")
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "ADD DATA" then
 					--print("PLOTSERVER ADD DATA")
 					if managedPlots[msg[2]] then
@@ -354,21 +399,10 @@ local function setupTimer()
 							
 							for i = 1,numT-1 do
 								data[i],err = client:receive(CHUNKED_LIMIT)
-								if data[i] then
---[=[									retmsg = [[{"ACKNOWLEDGE"}]].."\n"
-									nmsg,err = client:send(retmsg)
-									if not nmsg then
-										if err == "closed" then
-											exitProg = true
-											client:close()
-											iup.Close()
-										elseif err == "timeout" then
-											retry = retmsg
-										end
-									end]=]
-								else
+								if not data[i] then
 									--print("PLOTSERVER: receive error: "..err)
 									retmsg = [[{"ERROR","No Chunk Received"}]].."\n"
+									
 									nmsg,err = client:send(retmsg)
 									if not nmsg then
 										if err == "closed" then
@@ -388,33 +422,15 @@ local function setupTimer()
 							if data[#data] then
 								-- convert msg to table
 								--print("PLOTSERVER: "..msg)
-								data = t2s.stringToTable(table.concat(data))
+								data = tu.s2t(table.concat(data))
 								if not data then
 									retmsg = [[{"ERROR","Message not understood"}]].."\n"
-									msg,err = client:send(retmsg)
-									if not msg then
-										if err == "closed" then
-											exitProg = true
-											client:close()
-											iup.Close()
-										elseif err == "timeout" then
-											retry = retmsg
-										end
-									end
+									sendMSG(retmsg)
 								end
 							else
 								--print("PLOTSERVER: receive error (last): "..err)
 								retmsg = [[{"ERROR","No Chunk Received"}]].."\n"
-								nmsg,err = client:send(retmsg)
-								if not nmsg then
-									if err == "closed" then
-										exitProg = true
-										client:close()
-										iup.Close()
-									elseif err == "timeout" then
-										retry = retmsg
-									end
-								end
+								sendMSG(retmsg)
 							end
 						else
 							-- Just one transfer to get data
@@ -422,19 +438,10 @@ local function setupTimer()
 							if data then
 								-- convert msg to table
 								--print("PLOTSERVER: "..msg)
-								data = t2s.stringToTable(data)
+								data = tu.s2t(data)
 								if not data then
 									retmsg = [[{"ERROR","Message not understood"}]].."\n"
-									msg,err = client:send(retmsg)
-									if not msg then
-										if err == "closed" then
-											exitProg = true
-											client:close()
-											iup.Close()
-										elseif err == "timeout" then
-											retry = retmsg
-										end
-									end
+									sendMSG(retmsg)
 								end
 							end
 						end
@@ -445,16 +452,7 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
 					end
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "SHOW PLOT" then
 					if managedPlots[msg[2]] then
 						if not msg[3] or not type(msg[3]) == "table" then
@@ -506,16 +504,7 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
 					end
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "REDRAW" then
 					if managedPlots[msg[2]] then
 						managedPlots[msg[2]]:Redraw()
@@ -523,16 +512,7 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
 					end
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "DESTROY" then
 					if managedPlots[msg[2]] then
 --						print("PLOTSERVER: plot2dialog plots")
@@ -572,16 +552,7 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
 					end
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "WINDOW" then
 					-- Create a window and return the window index
 					if not msg[2] or not type(msg[2]) == "table" then
@@ -601,16 +572,7 @@ local function setupTimer()
 					end
 					managedWindows[#managedWindows + 1] = window(msg[2])
 					retmsg = [[{"ACKNOWLEDGE",]]..tostring(#managedWindows).."}\n"
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "ADD PLOT" then
 					if managedWindows[msg[2]] then
 						if managedPlots[msg[3]] then
@@ -646,16 +608,7 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No Window present at that index"}]].."\n"
 					end		-- window index check
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "EMPTY SLOT" then
 					if managedWindows[msg[2]] then
 						if msg[3] and type(msg[3]) == "table" and msg[3][1] and type(msg[3][1])=="number" and msg[3][2] and type(msg[3][2]) == "number"  then
@@ -676,16 +629,7 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No Window present at that index"}]].."\n"
 					end		-- window index check
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "SHOW WINDOW" then
 					--print("PLOTSERVER: SHOW WINDOW - "..msg[2])
 					if managedWindows[msg[2]] then
@@ -695,16 +639,7 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No window present at that index"}]].."\n"
 					end
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "DESTROY WIN" then
 					if managedWindows[msg[2]] then
 						if managedWindows[msg[2]].dialog.visible == "NO" then
@@ -724,51 +659,18 @@ local function setupTimer()
 					else
 						retmsg = [[{"ERROR","No window present at that index"}]].."\n"
 					end
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "SET ATTRIBUTES" then
 					if managedPlots[msg[2]] then
 						if not msg[3] or type(msg[3])~="table" then
 							retmsg = [[{"ERROR","Expecting table of attributes for third parameter"}]].."\n"
 						end
-						if msg[3].AXS_BOUNDS then
-							local t = msg[3].AXS_BOUNDS
-							msg[3].AXS_XMIN = t[1]
-							msg[3].AXS_YMIN = t[2]
-							msg[3].AXS_XMAX = t[3]
-							msg[3].AXS_YMAX = t[4]
-							msg[3].AXS_BOUNDS = nil
-						end
-						-- mode must be set before any other attributes!
-						if msg[3].DS_MODE then
-							managedPlots[msg[2]].DS_MODE = msg[3].DS_MODE
-							msg[3].DS_MODE = nil
-						end
-						for k,v in pairs(msg[3]) do
-							managedPlots[msg[2]][k] = v
-						end
+						managedPlots[msg[2]]:Attributes(msg[3])
 						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
 					end
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				elseif msg[1] == "LIST PLOTS" then
 					collectgarbage()
 					print("PLOTSERVER: Plotserver list:")
@@ -786,29 +688,11 @@ local function setupTimer()
 					end
 				else
 					retmsg = [[{"ERROR","Command not understood"}]].."\n"
-					msg,err = client:send(retmsg)
-					if not msg then
-						if err == "closed" then
-							exitProg = true
-							client:close()
-							iup.Close()
-						elseif err == "timeout" then
-							retry = retmsg
-						end
-					end
+					sendMSG(retmsg)
 				end
 			else		-- if msg then (If stringToTable returned something)
 				retmsg = [[{"ERROR","Message not understood"}]].."\n"
-				msg,err = client:send(retmsg)
-				if not msg then
-					if err == "closed" then
-						exitProg = true
-						client:close()
-						iup.Close()
-					elseif err == "timeout" then
-						retry = retmsg
-					end
-				end
+				sendMSG(retmsg)
 			end		-- if msg then (If stringToTable returned something)
 		elseif err == "closed" then
 			-- Exit this program as well
@@ -841,6 +725,9 @@ if parentPort then
 	else
 		--print("PLOTSERVER: Connect Parent unsuccessful")
 	end
+else
+	-- Create access to pplot
+	plot = pplot
 end 	-- if parentPort and port then ends
 
 
