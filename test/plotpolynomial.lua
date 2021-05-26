@@ -8,13 +8,13 @@ function func(x)
 end
 
 xy = {}
-for i = -10,10,0.1 do
+for i = -10,10,1 do
 	xy[#xy+1] = {i,func(i)}
 end
 
 p = plot.plot({})
 
-p:AddSeries(xy)
+p:AddSeries(xy,{DS_MODE="MARK"})
 
 p:Show()
 
