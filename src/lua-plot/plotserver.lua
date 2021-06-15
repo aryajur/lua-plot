@@ -353,6 +353,7 @@ local function setupTimer()
 		if msg then
 			-- convert msg to table
 			--print("PLOTSERVER: "..msg)
+			--print("PLOTSERVER s2t: "..tu.t2s({tu.s2t(msg)}))
 			msg = tu.s2t(msg)
 			if msg then
 				if msg[1] == "END" then
@@ -691,6 +692,7 @@ local function setupTimer()
 					sendMSG(retmsg)
 				end
 			else		-- if msg then (If stringToTable returned something)
+				--print("PLOTSERVER: msg parse failure.")
 				retmsg = [[{"ERROR","Message not understood"}]].."\n"
 				sendMSG(retmsg)
 			end		-- if msg then (If stringToTable returned something)
