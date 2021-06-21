@@ -362,6 +362,7 @@ local function setupTimer()
 					iup.Close()
 				elseif msg[1] == "PLOT" then
 					-- Create a plot and return the plot index
+					--print("PLOTSERVER: CREATE PLOT")
 					local i = 1
 					while true do
 						if not managedPlots[i] then
@@ -371,24 +372,14 @@ local function setupTimer()
 					end
 					managedPlots[i] = pplot(msg[2])
 					retmsg = [[{"ACKNOWLEDGE",]]..tostring(i).."}\n"
-					--print("PLOTSERVER: Received Plot command. Send ACKNOWLEDGE")
+					--print("PLOTSERVER: Received Plot command. Send ACKNOWLEDGE "..tostring(i))
 					sendMSG(retmsg)
 				elseif msg[1] == "ADD DATA" then
 					--print("PLOTSERVER ADD DATA")
+					local END
 					if managedPlots[msg[2]] then
 						-- Send Acknowledgement of command received
 						local data,nmsg
---[=[						retmsg = [[{"ACKNOWLEDGE"}]].."\n"
-						nmsg,err = client:send(retmsg)
-						if not nmsg then
-							if err == "closed" then
-								exitProg = true
-								client:close()
-								iup.Close()
-							elseif err == "timeout" then
-								retry = retmsg
-							end
-						end]=]
 						local to = client:gettimeout()
 						client:settimeout(2)	-- 2 second timeout
 						-- Add the data to the plot
@@ -396,42 +387,47 @@ local function setupTimer()
 						if msg[4] then
 							-- This is chunked transfer
 							local numT = tonumber(msg[4])
+							--print("PLOTSERVER: Chunked transfer request for "..numT.." transfers")
 							data = {}
-							
 							for i = 1,numT-1 do
 								data[i],err = client:receive(CHUNKED_LIMIT)
 								if not data[i] then
 									--print("PLOTSERVER: receive error: "..err)
-									retmsg = [[{"ERROR","No Chunk Received"}]].."\n"
-									
-									nmsg,err = client:send(retmsg)
-									if not nmsg then
-										if err == "closed" then
-											exitProg = true
-											client:close()
-											iup.Close()
-										elseif err == "timeout" then
-											retry = retmsg
-										end
+									sendMSG([[{"ERROR","No Chunk Received"}]].."\n")
+								else
+									--print("PLOTSERVER: CHUNKED TRANSFER number and size and total "..i.." "..#data[i].." "..numT)
+									--print("PLOTSERVER: Send ACK for chunk "..tostring(i))
+									sendMSG([[{"ACKNOWLEDGE",]]..tostring(i)..[[}]].."\n")
+									if data[i]:gsub(" ","")=="END" then
+										END = true
+										--print("Cancel Transfer.")
+										break
 									end
 								end
-								--print("PLOTSERVER: CHUNKED TRANSFER number and size and total "..i.." "..#data[i].." "..numT)
 							end
-							-- Get the last transfer
-							data[#data+1],err = client:receive("*l")
-							--print("PLOTSERVER: CHUNKED TRANSFER number and size and total "..numT.." "..#data[#data].." "..numT)
-							if data[#data] then
-								-- convert msg to table
-								--print("PLOTSERVER: "..msg)
-								data = tu.s2t(table.concat(data))
-								if not data then
-									retmsg = [[{"ERROR","Message not understood"}]].."\n"
+							if not END then
+								-- Get the last transfer
+								data[#data+1],err = client:receive("*l")
+								if data[#data] then
+									--print("PLOTSERVER: CHUNKED TRANSFER number and size and total "..numT.." "..#data[#data].." "..numT)
+									-- convert msg to table
+									--print("PLOTSERVER: "..msg)
+									--print("PLOTSERVER: Send ACK for chunk "..numT)
+									sendMSG([[{"ACKNOWLEDGE",]]..tostring(numT)..[[}]].."\n")
+									if data[#data]:gsub(" ","")=="END" then
+										END = true
+										--print("Cancel Transfer.")
+									end
+									data = tu.s2t(table.concat(data))
+									if not data then
+										retmsg = [[{"ERROR","Message not understood"}]].."\n"
+										sendMSG(retmsg)
+									end
+								else
+									--print("PLOTSERVER: receive error (last): "..err)
+									retmsg = [[{"ERROR","No Chunk Received"}]].."\n"
 									sendMSG(retmsg)
 								end
-							else
-								--print("PLOTSERVER: receive error (last): "..err)
-								retmsg = [[{"ERROR","No Chunk Received"}]].."\n"
-								sendMSG(retmsg)
 							end
 						else
 							-- Just one transfer to get data
@@ -447,9 +443,11 @@ local function setupTimer()
 							end
 						end
 						client:settimeout(to)-- Set the timeout back to the default value
-						--print(#data[1],#data[2])
-						local ds = managedPlots[msg[2]]:AddSeries(data[1],data[2],msg[3])
-						retmsg = [[{"ACKNOWLEDGE",]]..tostring(ds)..[[}]].."\n"
+						if not END then
+							--print(#data[1],#data[2])
+							local ds = managedPlots[msg[2]]:AddSeries(data[1],data[2],msg[3])
+							retmsg = [[{"ACKNOWLEDGE",]]..tostring(ds)..[[}]].."\n"
+						end
 					else
 						retmsg = [[{"ERROR","No Plot present at that index"}]].."\n"
 					end

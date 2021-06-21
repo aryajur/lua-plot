@@ -12,6 +12,7 @@ local assert = assert
 local print = print
 local getfenv = getfenv
 local tostring = tostring
+local string = string
 
 -- Set this to nil to use llthreads to launch plotserver as a thread
 local USE_PROCESS = USE_PROCESS
@@ -34,7 +35,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.19.09.05"
+_VERSION = "1.21.06.21"
 
 -- To do
 --[[
@@ -68,7 +69,7 @@ local windowObjectMeta = {}		-- Metatable to identify window objects
 
 local tu = require("tableUtils")
 
-CHUNKED_LIMIT = 50000
+CHUNKED_LIMIT = 500000
 
 -- Launch the plot server
 local port = 6348
@@ -391,7 +392,7 @@ do
 		if not plotNum then
 			return nil, "Could not find the associated plot index"
 		end
-		local function checkACK()
+		local function checkACK(dataset)
 			sendMsg = conn:receive("*l")
 			if not sendMsg then
 				return nil, "No Acknowledgement from plot server"
@@ -406,7 +407,10 @@ do
 			if sendMsg[1] ~= "ACKNOWLEDGE" then
 				return nil, "Plotserver not responding correctly"
 			end
-			return sendMsg[2]	-- Return the dataset number
+			if dataset and sendMsg[2] ~= dataset then
+				return nil, "Incorrect data set"
+			end
+			return true	-- Return the dataset number
 		end
 		
 		--local sendMsg = {"ADD DATA",plotNum,xvalues,yvalues,options}
@@ -415,7 +419,9 @@ do
 		-- If the data is large then it has to be sent in chunks
 		local send = tu.t2s(sendData).."\n"
 		local sendlen = #send
+		--print("Data length=",sendlen)
 		if sendlen > CHUNKED_LIMIT then
+			--print("Doing chunked transfer in "..CHUNKED_LIMIT.." packet size")
 			sendMsg[4] = math.modf(sendlen/CHUNKED_LIMIT + 1)
 			if not conn:send(tu.t2s(sendMsg).."\n") then
 				return nil, "Cannot communicate with plot server"
@@ -427,7 +433,7 @@ do
 				conn:settimeout(to)
 				return nil,err 
 			end]]
-			
+			local chunknum = 1
 			local chunkpos = 1
 			while chunkpos <= sendlen do
 				local lim
@@ -436,18 +442,27 @@ do
 				else
 					lim = chunkpos+CHUNKED_LIMIT-1
 				end
-				--print("Size of addseries message: "..#send:sub(chunkpos,lim))
+				--print("Size of addseries message: "..#send:sub(chunkpos,lim),chunknum)
 				if not conn:send(send:sub(chunkpos,lim)) then
 					conn:settimeout(to)
 					return nil, "Cannot communicate with plot server"
 				end
---[[				local msg,err = checkACK()
+				local msg,err = checkACK(chunknum)
 				if not msg then 
+					if err == "Incorrect data set" then
+						--print("LUA-PLOT: Incorrect dataset ACK.")
+						-- cancel transaction
+						conn:send("END"..string.rep(" ",CHUNKED_LIMIT-3))
+						checkACK()
+					else
+						--print("LUA-PLOT: ACK not received")
+					end
 					conn:settimeout(to)
 					return nil,err 
-				end]]
-				
+				end
+				--print("LUA-PLOT: Received ACK for chunk "..tostring(chunknum))
 				chunkpos = lim + 1
+				chunknum = chunknum + 1
 			end
 		else
 			if not conn:send(tu.t2s(sendMsg).."\n") then
@@ -470,13 +485,12 @@ do
 				return nil,err 
 			end]]
 		end
+		conn:settimeout(to)
 		local msg,err = checkACK()
 		if not msg then 
-			conn:settimeout(to)
 			return nil,err 
 		end
-		conn:settimeout(to)
-		return msg	-- Return dataset number
+		return true
 	end
 			
 	function plotAPI.Show(plot,tbl)
@@ -650,8 +664,8 @@ end
 -- Function to return a Bode plot function
 -- tbl is the table containing all the parameters
 -- .func = single parameter function of the complex frequency s from which the magnitude and phase can be computed
--- .ini = starting frequency of the plot (default = 0.01)
--- .finfreq = ending frequency of the plot (default = 1MHz)
+-- .ini = starting frequency of the plot in Hz (default = 0.01Hz)
+-- .finfreq = ending frequency of the plot Hz (default = 1MHz)
 -- .steps = number of steps per decade for the plot (default=50)
 function bodePlot(tbl)
 	garbageCollect()
@@ -669,7 +683,7 @@ function bodePlot(tbl)
 	local finfreq = tbl.finfreq or 1e6
 	local mag = {}
 	local phase = {}
-	local lg = tbl.func(math.i*ini)
+	local lg = tbl.func(math.i*2*math.pi*ini)
 	mag[#mag+1] = {ini,20*math.log(math.abs(lg),10)}
 	if math.abs(mag[#mag][2]) == math.huge then
 		mag[#mag][2] = 0
@@ -684,7 +698,7 @@ function bodePlot(tbl)
 		-- Loop to calculate all points in the present decade starting from ini
 		local lg
 		for i=1,steps do
-			lg = func(math.i*(ini+i*(fin-ini)/steps))
+			lg = func(math.i*2*math.pi*(ini+i*(fin-ini)/steps))
 			m[#m+1] = {ini+i*(fin-ini)/steps,20*math.log(math.abs(lg),10)}
 			p[#p+1] = {ini+i*(fin-ini)/steps,180/math.pi*math.atan2(lg.i,lg.r)}
 			if math.abs(m[#m][2]) == math.huge then
@@ -739,7 +753,7 @@ function bodePlot(tbl)
 			fin = 10*ini
 			mag = {}
 			phase = {}
-			lg = func(math.i*ini)
+			lg = func(math.i*2*math.pi*ini)
 			mag[#mag+1] = {ini,20*math.log(math.abs(lg),10)}
 			phase[#phase+1] = {ini,180/math.pi*math.atan2(lg.i,lg.r)}
 			magmax = mag[1][2]
