@@ -164,6 +164,10 @@ local function pplot (tbl)
 
 	-- If xvalues is not given then yvalues are plotted as a series
 	-- If for a particular xvalue the yvalue is nil (in case of infinite or divide by 0 kind of errors) then a new segment will be started from the next y value
+	-- forms of call:
+	-- plot:AddSeries(xvalues,yvalues,[options])
+	-- plot:AddSeries(yvalues,nil,[options])
+	-- plot:AddSeries(xyvalues,[options])
     function plot:AddSeries(xvalues,yvalues,options)
 		local str,series, newS
         if type(xvalues[1]) == "table" then
@@ -212,6 +216,7 @@ local function pplot (tbl)
 							plot:AddSegment(i,yvalues[i])
 						elseif newS then
 							plot:AddSegment(xvalues[i],yvalues[i])
+							newS = nil
 						else
 							plot:Add(xvalues[i],yvalues[i])
 						end
