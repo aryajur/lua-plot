@@ -162,8 +162,10 @@ local function pplot (tbl)
         return iup.PlotBegin(plot,0)
     end
 
+	-- If xvalues is not given then yvalues are plotted as a series
+	-- If for a particular xvalue the yvalue is nil (in case of infinite or divide by 0 kind of errors) then a new segment will be started from the next y value
     function plot:AddSeries(xvalues,yvalues,options)
-		local str,newS
+		local str,series, newS
         if type(xvalues[1]) == "table" then
             options = yvalues
 			if type(xvalues[1][1]) == "string" then
@@ -174,7 +176,7 @@ local function pplot (tbl)
 			end
             for i,v in ipairs(xvalues) do
 				if not v[2] then
-					newS = true	-- Start a new segment with the next sample
+					newS = true	-- Y value non existant so start a new segment from the next y value
 				else
 					if str then
 						plot:AddStr(v[1],v[2])
@@ -195,17 +197,21 @@ local function pplot (tbl)
 			else
 				plot:Begin()
 			end
-			
+			if not yvalues then
+				yvalues = xvalues
+				series = true
+			end
             for i = 1,#xvalues do
 				if not yvalues[i] then
-					newS = true	-- Start a new segment with the next sample
+					newS = true	-- Y value non existant so start a new segment from the next y value
 				else
 					if str then
 						plot:AddStr(xvalues[i],yvalues[i])
 					else
-						if newS then
+						if series then
+							plot:AddSegment(i,yvalues[i])
+						elseif newS then
 							plot:AddSegment(xvalues[i],yvalues[i])
-							newS = nil
 						else
 							plot:Add(xvalues[i],yvalues[i])
 						end
