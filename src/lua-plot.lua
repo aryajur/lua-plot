@@ -1,6 +1,8 @@
 -- Module to add plotting functionality
 -- This module launches the plot server
-local modname = ...
+local args = {...}
+
+local modname = args[1]
 
 local require = require
 local math = math
@@ -35,7 +37,7 @@ else
 	_ENV = M
 end
 
-_VERSION = "1.21.06.21"
+_VERSION = "1.21.07.06"
 
 -- To do
 --[[
@@ -83,7 +85,17 @@ local plotservercode = [[
 		if args[i] == "CHUNKED_LIMIT" and args[i+1] and type(args[i+1]) == "number" then
 			CHUNKED_LIMIT = math.floor(args[i+1])
 		end
+		if args[i] == "MOD PATH" and type(args[i+1]) == "string" then
+			MODPATH = args[i+1]
+		end
 	end
+	--print("Received MODPATH="..tostring(MODPATH))
+	if package.path:sub(-1,-1) ~= ";" then
+		package.path = package.path..";"
+	end
+	package.path = package.path..MODPATH:gsub("lua%-plot","?")..";"
+	--print("New Package.path is:")
+	--print(package.path)
 	-- Searcher for nested lua modules
 	package.searchers[#package.searchers + 1] = function(mod)
 		-- Check if this is a multi hierarchy module
@@ -131,7 +143,7 @@ end
 --print("PLOT: Starting plotserver by passing port number=",port)
 local plotserver
 if not USE_PROCESS then
-	plotserver = llthreads.new(plotservercode, "PARENT PORT", port, "CHUNKED_LIMIT",CHUNKED_LIMIT)
+	plotserver = llthreads.new(plotservercode, "PARENT PORT", port, "CHUNKED_LIMIT",CHUNKED_LIMIT,"MOD PATH",args[2])
 	stat = plotserver:start(true)	-- Start plotserver in a independent non joinable thread
 	if not stat then
 		-- Could not start the plotserver as a new thread
