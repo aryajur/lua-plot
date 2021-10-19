@@ -431,9 +431,9 @@ do
 		-- If the data is large then it has to be sent in chunks
 		local send = tu.t2s(sendData).."\n"
 		local sendlen = #send
-		--print("Data length=",sendlen)
+		--print("LUA-PLOT: Data length=",sendlen)
 		if sendlen > CHUNKED_LIMIT then
-			--print("Doing chunked transfer in "..CHUNKED_LIMIT.." packet size")
+			--print("LUA-PLOT: Doing chunked transfer in "..CHUNKED_LIMIT.." packet size")
 			sendMsg[4] = math.modf(sendlen/CHUNKED_LIMIT + 1)
 			if not conn:send(tu.t2s(sendMsg).."\n") then
 				return nil, "Cannot communicate with plot server"
@@ -477,6 +477,7 @@ do
 				chunknum = chunknum + 1
 			end
 		else
+			--print("LUA-PLOT: Doing one transfer.",tu.t2s(sendMsg))
 			if not conn:send(tu.t2s(sendMsg).."\n") then
 				conn:settimeout(to)
 				return nil, "Cannot communicate with plot server"
@@ -486,7 +487,7 @@ do
 				conn:settimeout(to)
 				return nil,err 
 			end]]
-			
+			--print("LUA-PLOT: Send data..",send)
 			if not conn:send(send) then
 				conn:settimeout(to)
 				return nil, "Cannot communicate with plot server"

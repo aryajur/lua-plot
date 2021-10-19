@@ -442,10 +442,10 @@ local function setupTimer()
 							end
 						else
 							-- Just one transfer to get data
+							--print("PLOTSERVER: One Transfer data")
 							data,err = client:receive("*l")
 							if data then
 								-- convert msg to table
-								--print("PLOTSERVER: "..msg)
 								data = tu.s2t(data)
 								if not data then
 									retmsg = [[{"ERROR","Message not understood"}]].."\n"
@@ -455,6 +455,7 @@ local function setupTimer()
 						end
 						client:settimeout(to)-- Set the timeout back to the default value
 						if not END then
+							--print("PLOTSERVER: Add data")
 							--print(#data[1],#data[2])
 							local ds = managedPlots[msg[2]]:AddSeries(data[1],data[2],msg[3])
 							retmsg = [[{"ACKNOWLEDGE",]]..tostring(ds)..[[}]].."\n"
