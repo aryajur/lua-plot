@@ -15,15 +15,33 @@ local print = print
 local getfenv = getfenv
 local tostring = tostring
 local string = string
+local pcall = pcall
+local loadstring = loadstring
+local load = load
 
--- Set this to nil to use llthreads to launch plotserver as a thread
-local USE_PROCESS = USE_PROCESS
+local os = os
 
-local llthreads
+-- Set this to nil to use Lua Lanes to launch plotserver as a thread
+-- Set to true to use process mode (recommended for wxWidgets/gnuplot)
+local USE_PROCESS = nil  -- Try Lua Lanes with proper configuration
+
+-- Set USE_GNUPLOT to true to use gnuplot backend instead of MathGL
+-- The gnuplot backend provides more plotting capabilities and better extensibility
+local USE_GNUPLOT = true	--false  -- Temporarily test with MathGL
+
+local lanes
 if not USE_PROCESS then
-    local ok
-    ok, llthreads = pcall(require, "llthreads2")
-    if not ok then llthreads = require"llthreads" end
+    local ok, lanes_module
+    ok, lanes_module = pcall(require, "lanes")
+    if ok then
+        -- Configure lanes properly
+        lanes = lanes_module.configure()
+        print("PLOT: Lua Lanes configured successfully")
+    else
+        print("PLOT: ERROR - Lua Lanes not found:", lanes_module)
+        print("PLOT: Falling back to process mode")
+        USE_PROCESS = true
+    end
 end
 local socket = require("socket")
 local package = package
@@ -76,7 +94,11 @@ CHUNKED_LIMIT = 500000
 -- Launch the plot server
 local port = 6348
 local plotservercode = [[
+	io.write("PLOTSERVER: Lane code starting...\n")
+	io.flush()
 	local args = {...}		-- arguments given by parent
+	io.write("PLOTSERVER: Processing arguments...\n")
+	io.flush()
 	-- Search for PARENT PORT number and store it in parentPort global variable
 	for i=1,#args,2 do
 		if args[i] == "PARENT PORT" and args[i+1] and type(args[i+1]) == "number" then
@@ -88,14 +110,30 @@ local plotservercode = [[
 		if args[i] == "MOD PATH" and type(args[i+1]) == "string" then
 			MODPATH = args[i+1]
 		end
+		if args[i] == "USE_GNUPLOT" and args[i+1] ~= nil then
+			USE_GNUPLOT = args[i+1]
+		end
 	end
-	--print("Received MODPATH="..tostring(MODPATH))
+	io.write("PLOTSERVER: parentPort=" .. tostring(parentPort) .. ", MODPATH=" .. tostring(MODPATH) .. "\n")
+	io.flush()
 	if package.path:sub(-1,-1) ~= ";" then
 		package.path = package.path..";"
 	end
 	package.path = package.path..MODPATH:gsub("lua%-plot","?")..";"
+	-- Add standard Lua library paths for .lua and .so files
+	local home = os.getenv("HOME") or "/home/aryajur"
+	package.path = package.path..home.."/Lua/?.lua;"..home.."/Lua/?/init.lua;"
+	-- Add gnuplotmod path for wxgnuplot widget
+	package.path = package.path.."/mnt/g/Milind/Documents/Workspace/gnuplotmod/src/?.lua;"
+	-- Set up package.cpath for C modules
+	if package.cpath:sub(-1,-1) ~= ";" then
+		package.cpath = package.cpath..";"
+	end
+	package.cpath = package.cpath..home.."/Lua/?.so;"..home.."/Lua/?/?.so;"
 	--print("New Package.path is:")
 	--print(package.path)
+	--print("New Package.cpath is:")
+	--print(package.cpath)
 	-- Searcher for nested lua modules
 	package.searchers[#package.searchers + 1] = function(mod)
 		-- Check if this is a multi hierarchy module
@@ -123,9 +161,18 @@ local plotservercode = [[
 				end
 			end
 			return totErr
-		end	
+		end
 	end
-	require("lua-plot.plotserver")
+	-- Load the appropriate plotserver backend
+	io.write("PLOTSERVER: Loading plotserver backend (USE_GNUPLOT=" .. tostring(USE_GNUPLOT) .. ")...\n")
+	io.flush()
+	if USE_GNUPLOT then
+		require("lua-plot.plotserver-gnuplot")
+	else
+		require("lua-plot.plotserver")
+	end
+	io.write("PLOTSERVER: Plotserver backend loaded successfully\n")
+	io.flush()
 ]]
 local server,stat,conn
 server = socket.bind("*",port)
@@ -143,12 +190,103 @@ end
 --print("PLOT: Starting plotserver by passing port number=",port)
 local plotserver
 if not USE_PROCESS then
-	plotserver = llthreads.new(plotservercode, "PARENT PORT", port, "CHUNKED_LIMIT",CHUNKED_LIMIT,"MOD PATH",args[2])
-	stat = plotserver:start(true)	-- Start plotserver in a independent non joinable thread
-	if not stat then
-		-- Could not start the plotserver as a new thread
+	-- Create lane body as a string to avoid upvalue transfer issues
+	local plotserver_code = [[
+		return function(port_num, chunk_limit, modpath, use_gnuplot)
+			io.write("PLOTSERVER: Lane starting with port=" .. tostring(port_num) .. "\n")
+			io.flush()
+
+			-- Set global variables that plotserver expects
+			parentPort = port_num
+			CHUNKED_LIMIT = chunk_limit
+			MODPATH = modpath
+			USE_GNUPLOT = use_gnuplot
+
+			-- Setup package paths
+			if package.path:sub(-1,-1) ~= ";" then
+				package.path = package.path..";"
+			end
+			package.path = package.path..MODPATH:gsub("lua%-plot","?")..";"
+
+			-- Add standard Lua library paths
+			local home = os.getenv("HOME") or "/home/aryajur"
+			package.path = package.path..home.."/Lua/?.lua;"..home.."/Lua/?/init.lua;"
+			-- Add gnuplotmod path
+			package.path = package.path.."/mnt/g/Milind/Documents/Workspace/gnuplotmod/src/?.lua;"
+
+			-- Set up C module paths
+			if package.cpath:sub(-1,-1) ~= ";" then
+				package.cpath = package.cpath..";"
+			end
+			package.cpath = package.cpath..home.."/Lua/?.so;"..home.."/Lua/?/?.so;"
+
+			io.write("PLOTSERVER: Package paths configured\n")
+			io.flush()
+
+			-- Load the plotserver
+			if USE_GNUPLOT then
+				io.write("PLOTSERVER: Loading gnuplot plotserver...\n")
+				io.flush()
+				require("lua-plot.plotserver-gnuplot")
+			else
+				io.write("PLOTSERVER: Loading MathGL plotserver...\n")
+				io.flush()
+				require("lua-plot.plotserver")
+			end
+
+			io.write("PLOTSERVER: Plotserver loaded\n")
+			io.flush()
+		end
+	]]
+
+	-- Load the lane function from string
+	local loadfunc = loadstring or load
+	local lane_func = loadfunc(plotserver_code)()
+
+	-- Create and start the lane
+	-- Use "*" to load all standard libraries
+	print("PLOT: Creating lane generator...")
+	local lane_gen = lanes.gen("*", lane_func)
+	print("PLOT: Starting lane with port", port)
+	plotserver = lane_gen(port, CHUNKED_LIMIT, args[2], USE_GNUPLOT)
+
+	if not plotserver then
+		print("PLOT: ERROR - Could not start plotserver lane")
+		-- Could not start the plotserver as a new lane
 		package.loaded[modname] = nil
 		return	-- exit module without loading it
+	end
+	print("PLOT: Lane started successfully")
+
+	-- Check lane status after a short delay to see if it crashed
+	local socket_for_sleep = require("socket")
+	socket_for_sleep.sleep(0.1)
+	local status = plotserver.status
+	print("PLOT: Lane status:", status)
+	if status == "error" then
+		-- Try to get error details using lanes API
+		local ok, err_msg = pcall(function() return plotserver:join(0) end)
+		if not ok then
+			print("PLOT: Lane error (couldn't retrieve):", err_msg)
+		else
+			print("PLOT: Lane error:", err_msg)
+		end
+	end
+else
+	-- Launch plotserver as a separate process
+	local plotserver_path = args[2]:gsub("lua%-plot%.lua$", "lua-plot/plotserver-gnuplot.lua")
+	local lua_cmd = "lua"
+	-- Build command with environment variables
+	local cmd = string.format(
+		"parentPort=%d CHUNKED_LIMIT=%d MODPATH='%s' USE_GNUPLOT=%s %s '%s' &",
+		port, CHUNKED_LIMIT, args[2], tostring(USE_GNUPLOT), lua_cmd, plotserver_path
+	)
+	print("PLOT: Launching plotserver process:", cmd)
+	local ok = os.execute(cmd)
+	if not ok then
+		print("PLOT: ERROR - Failed to launch plotserver process")
+		package.loaded[modname] = nil
+		return
 	end
 end
 
@@ -159,11 +297,15 @@ if USE_PROCESS then
 else
 	server:settimeout(10)
 end
---print("Waiting for server to connect...")
-conn = server:accept()
---print("Connection object is ",conn)
+print("Waiting for server to connect...")
+local conn, err = server:accept()
+print("Connection object is ", conn)
+if err then
+	print("Connection error:", err)
+end
 if not conn then
 	-- Did not get connection
+	print("PLOT: ERROR - Plotserver did not connect within timeout")
 	package.loaded[modname] = nil
 	return
 end
