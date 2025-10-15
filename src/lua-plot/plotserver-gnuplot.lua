@@ -208,6 +208,26 @@ function GnuplotPlot:addSeries(xvalues, yvalues, options)
     return #self.series
 end
 
+-- Add an expression series (e.g., "sin(x)", "x**2", etc.)
+function GnuplotPlot:addExpression(expression, options)
+    -- Validate expression
+    if type(expression) ~= "string" or expression == "" then
+        return nil, "Expression must be a non-empty string"
+    end
+
+    options = options or {}
+
+    local series = {
+        is_expression = true,
+        expression = expression,
+        options = options
+        -- No xdata, ydata, datafile, or datablock_name for expressions
+    }
+
+    table.insert(self.series, series)
+    return #self.series
+end
+
 -- Write data to temporary file
 function GnuplotPlot:writeDataToTempFile(xdata, ydata)
     -- Use os.tmpname() which returns proper /tmp/lua_* paths
@@ -365,21 +385,28 @@ function GnuplotPlot:buildGnuplotCommands()
 
             local seriesOptions = AttributeMapping:processSeriesOptions(effectiveOptions)
 
-            -- Use datablock if available, otherwise use temp file
-            local data_source
-            if series.datablock_name then
-                data_source = series.datablock_name
-                --[[io.write(string.format("PLOTSERVER: Building plot command for series %d, using data block '%s'\n",
-                                       i, data_source))]]
+            -- Check if this is an expression series or data series
+            if series.is_expression then
+                -- Expression series: plot the expression directly
+                table.insert(plotParts, string.format("%s %s",
+                                                     series.expression, seriesOptions))
             else
-                data_source = string.format("'%s'", series.datafile)
-                --[[io.write(string.format("PLOTSERVER: Building plot command for series %d, using temp file '%s'\n",
-                                       i, series.datafile or "NIL"))]]
-            end
-            --io.flush()
+                -- Data series: use datablock if available, otherwise use temp file
+                local data_source
+                if series.datablock_name then
+                    data_source = series.datablock_name
+                    --[[io.write(string.format("PLOTSERVER: Building plot command for series %d, using data block '%s'\n",
+                                           i, data_source))]]
+                else
+                    data_source = string.format("'%s'", series.datafile)
+                    --[[io.write(string.format("PLOTSERVER: Building plot command for series %d, using temp file '%s'\n",
+                                           i, series.datafile or "NIL"))]]
+                end
+                --io.flush()
 
-            table.insert(plotParts, string.format("%s using 1:2 %s",
-                                                 data_source, seriesOptions))
+                table.insert(plotParts, string.format("%s using 1:2 %s",
+                                                     data_source, seriesOptions))
+            end
         end
 
         local plotCmd = "plot " .. table.concat(plotParts, ", ")
@@ -687,6 +714,22 @@ local function setupTimer(app)
 							sendMSG([[{"ACKNOWLEDGE"}]] .. "\n")
 						else
 							sendMSG([[{"ERROR","Data not received"}]] .. "\n")
+						end
+					else
+						sendMSG([[{"ERROR","No Plot present at that index"}]] .. "\n")
+					end
+
+				elseif msg[1] == "ADD EXPRESSION" then
+					if managedPlots[msg[2]] then
+						-- msg[2] is plot index, msg[3] is expression string, msg[4] is options
+						local expression = msg[3]
+						local options = msg[4] or {}
+
+						local seriesIndex, err = managedPlots[msg[2]]:addExpression(expression, options)
+						if seriesIndex then
+							sendMSG([[{"ACKNOWLEDGE"}]] .. "\n")
+						else
+							sendMSG(string.format([[{"ERROR","%s"}]], err or "Failed to add expression") .. "\n")
 						end
 					else
 						sendMSG([[{"ERROR","No Plot present at that index"}]] .. "\n")

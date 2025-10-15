@@ -679,7 +679,52 @@ do
 		end
 		return true
 	end
-			
+
+	function plotAPI.AddExpression(plot, expression, options)
+		garbageCollect()
+
+		-- Validate expression
+		if type(expression) ~= "string" or expression == "" then
+			return nil, "Expression must be a non-empty string"
+		end
+
+		local plotNum
+		-- Find the plot object in plots to get the reference number to send to plotserver
+		for k,v in pairs(plots) do
+			if v == plot then
+				plotNum = k
+				break
+			end
+		end
+		if not plotNum then
+			return nil, "Could not find the associated plot index"
+		end
+
+		-- Send ADD EXPRESSION message with expression string and options
+		local sendMsg = {"ADD EXPRESSION", plotNum, expression, options}
+		if not conn:send(tu.t2s(sendMsg).."\n") then
+			return nil, "Cannot communicate with plot server"
+		end
+
+		-- Wait for acknowledgement
+		local response = conn:receive("*l")
+		if not response then
+			return nil, "No Acknowledgement from plot server"
+		end
+		response = tu.s2t(response)
+		if not response then
+			return nil, "Plotserver not responding correctly"
+		end
+		if response[1] == "ERROR" then
+			return nil, response[2] or "Plotserver error adding expression"
+		end
+		if response[1] ~= "ACKNOWLEDGE" then
+			return nil, "Plotserver not responding correctly"
+		end
+
+		return true
+	end
+
 	function plotAPI.Show(plot,tbl)
 		garbageCollect()
 		local plotNum
