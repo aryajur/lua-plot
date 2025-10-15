@@ -5,31 +5,57 @@
 -- Load wx module FIRST as a global to ensure proper initialization
 wx = require("wx")
 
--- Initialize globals from environment or args (for process mode)
+-- Initialize globals from command-line args, then environment vars, then defaults
+local args = {...}
 if not parentPort then
-    parentPort = tonumber(os.getenv("parentPort")) or (... and select(2, ...)) or 6348
+    parentPort = tonumber(args[1]) or tonumber(os.getenv("parentPort")) or 6348
 end
 if not CHUNKED_LIMIT then
-    CHUNKED_LIMIT = tonumber(os.getenv("CHUNKED_LIMIT")) or 50
+    CHUNKED_LIMIT = tonumber(args[2]) or tonumber(os.getenv("CHUNKED_LIMIT")) or 500000
 end
 if not MODPATH then
-    MODPATH = os.getenv("MODPATH") or ""
+    MODPATH = args[3] or os.getenv("MODPATH") or ""
 end
 if USE_GNUPLOT == nil then
-    local env_gnuplot = os.getenv("USE_GNUPLOT")
-    USE_GNUPLOT = env_gnuplot ~= "false" and env_gnuplot ~= nil
+    if args[4] ~= nil then
+        USE_GNUPLOT = (args[4] == "true" or args[4] == true)
+    else
+        local env_gnuplot = os.getenv("USE_GNUPLOT")
+        USE_GNUPLOT = env_gnuplot ~= "false" and env_gnuplot ~= nil
+    end
 end
 
+--[[io.write("PLOTSERVER: Starting with parentPort=", tostring(parentPort),
+         " CHUNKED_LIMIT=", tostring(CHUNKED_LIMIT),
+         " USE_GNUPLOT=", tostring(USE_GNUPLOT), "\n")
+io.write("PLOTSERVER: MODPATH=", tostring(MODPATH), "\n")
+io.write("PLOTSERVER: package.path=", package.path, "\n")
+io.flush()
+
+io.write("PLOTSERVER: Requiring wxgnuplot...\n")
+io.flush()]]
 local wxgnuplot = require("wxgnuplot")
+--[[io.write("PLOTSERVER: wxgnuplot loaded\n")
+io.flush()
+
+io.write("PLOTSERVER: Requiring tableUtils...\n")
+io.flush()]]
 local tu = require("tableUtils")
+--[[io.write("PLOTSERVER: tableUtils loaded\n")
+io.flush()
+
+io.write("PLOTSERVER: Requiring lua-plot.gnuplot-attribute-mapping...\n")
+io.flush()]]
 local AttributeMapping = require("lua-plot.gnuplot-attribute-mapping")
+--[[io.write("PLOTSERVER: AttributeMapping loaded\n")
+io.flush()]]
 
 -- Configuration
--- IMPORTANT: Data blocks do NOT work with luacmd terminal (only with file terminals like png/svg)
--- The luacmd terminal is for capturing drawing commands, not for processing data blocks
--- Therefore, we MUST use temp files for all data
-local DATA_INLINE_THRESHOLD = 0  -- Always use temp files (data blocks don't work with luacmd)
+-- Use data blocks for small datasets, temp files for large datasets
+-- With the new set_datablock() API, data blocks work reliably with luacmd terminal
+local DATA_INLINE_THRESHOLD = 1000  -- Use data blocks for < 1000 points, temp files for >= 1000
 local TEMP_FILE_PREFIX = os.tmpname():match("(.*/)")  or "/tmp/"
+local datablock_counter = 0  -- Counter for generating unique datablock names
 
 -- ============================================================================
 -- GnuplotPlot Class
@@ -49,7 +75,7 @@ function GnuplotPlot:new(parent, attributes, w, h)
     self.attributes = attributes or {}
 
     -- Data series
-    self.series = {}  -- Array of {xdata, ydata, options, datafile}
+    self.series = {}  -- Array of {xdata, ydata, options, datafile, datablock_name}
 
     -- Auto-ranging data
     self.xmin = math.huge
@@ -69,13 +95,25 @@ function GnuplotPlot:new(parent, attributes, w, h)
 end
 
 function GnuplotPlot:ensurePanel(parent)
-    if self.panel then return self.panel end
-
     parent = parent or self.parent
 
-    -- Use wxgnuplot widget which handles resize automatically
+    -- If panel already exists with the same parent, reuse it
+    if self.panel and self.parent == parent then
+        return self.panel
+    end
+
+    -- If parent changed or no panel exists, create a new wxgnuplot widget
+    --[[io.write(string.format("PLOTSERVER: Creating new wxgnuplot panel (parent changed: %s)\n",
+                           self.panel and "yes" or "no"))
+    io.flush()]]
+
+    -- Store the new parent
+    self.parent = parent
+
+    -- Create new wxgnuplot widget with the correct parent
+    -- Use wxDefaultSize to let the sizer control the size (important for multi-graph windows)
     self.wxplot = wxgnuplot.new(parent, wx.wxID_ANY, wx.wxDefaultPosition,
-                                wx.wxSize(self.width, self.height))
+                                wx.wxDefaultSize)
     self.panel = self.wxplot:getPanel()
 
     return self.panel
@@ -99,17 +137,17 @@ function GnuplotPlot:addSeries(xvalues, yvalues, options)
             xdata[i] = xvalues[i][1]
             ydata[i] = xvalues[i][2]
         end
-        print(string.format("PLOTSERVER: addSeries - combined format, %d points", #xdata))
+        --[[print(string.format("PLOTSERVER: addSeries - combined format, %d points", #xdata))
         if #xdata > 0 then
             print(string.format("PLOTSERVER:   first point: (%g, %g)", xdata[1], ydata[1]))
             print(string.format("PLOTSERVER:   last point: (%g, %g)", xdata[#xdata], ydata[#ydata]))
-        end
+        end]]
     else
         -- Separate arrays
         options = options or {}
         xdata = xvalues
         ydata = yvalues
-        print(string.format("PLOTSERVER: addSeries - separate arrays, x=%d, y=%d points", #xdata, #ydata))
+        --print(string.format("PLOTSERVER: addSeries - separate arrays, x=%d, y=%d points", #xdata, #ydata))
     end
 
     -- Update ranges for auto-ranging
@@ -130,11 +168,39 @@ function GnuplotPlot:addSeries(xvalues, yvalues, options)
         xdata = xdata,
         ydata = ydata,
         options = options,
-        datafile = nil
+        datafile = nil,
+        datablock_name = nil
     }
 
-    -- For large datasets, write to temp file
-    if #xdata >= DATA_INLINE_THRESHOLD then
+    -- For small datasets, use data blocks; for large datasets, use temp files
+    if #xdata < DATA_INLINE_THRESHOLD then
+        -- Generate unique datablock name
+        datablock_counter = datablock_counter + 1
+        series.datablock_name = string.format("$DATA%d", datablock_counter)
+        --[[io.write(string.format("PLOTSERVER: Using data block '%s' for %d points\n",
+                               series.datablock_name, #xdata))
+        io.flush()]]
+
+        -- Build data string
+        local data_lines = {}
+        for i = 1, math.min(#xdata, #ydata) do
+            table.insert(data_lines, string.format("%.15g %.15g", xdata[i], ydata[i]))
+        end
+        local data_str = table.concat(data_lines, "\n")
+
+        -- Set the datablock using wxgnuplot API
+        local success = wxgnuplot.set_datablock(series.datablock_name, data_str)
+        if not success then
+            --[[io.write(string.format("PLOTSERVER: WARNING - set_datablock failed, falling back to temp file\n"))
+            io.flush()]]
+            series.datablock_name = nil
+            series.datafile = self:writeDataToTempFile(xdata, ydata)
+        --[[else
+            io.write(string.format("PLOTSERVER: Data block '%s' set successfully\n", series.datablock_name))
+            io.flush()]]
+        end
+    else
+        -- Large dataset: use temp file
         series.datafile = self:writeDataToTempFile(xdata, ydata)
     end
 
@@ -146,11 +212,11 @@ end
 function GnuplotPlot:writeDataToTempFile(xdata, ydata)
     -- Use os.tmpname() which returns proper /tmp/lua_* paths
     local tempfile = os.tmpname()
-    print(string.format("PLOTSERVER: Creating temp file: '%s'", tempfile))
+    --print(string.format("PLOTSERVER: Creating temp file: '%s'", tempfile))
 
     local f = io.open(tempfile, "w")
     if not f then
-        print(string.format("PLOTSERVER: ERROR - Cannot create temp file: '%s'", tempfile))
+        --print(string.format("PLOTSERVER: ERROR - Cannot create temp file: '%s'", tempfile))
         return nil
     end
 
@@ -159,7 +225,7 @@ function GnuplotPlot:writeDataToTempFile(xdata, ydata)
     end
     f:close()
 
-    print(string.format("PLOTSERVER: Wrote %d points to '%s'", math.min(#xdata, #ydata), tempfile))
+    --print(string.format("PLOTSERVER: Wrote %d points to '%s'", math.min(#xdata, #ydata), tempfile))
     table.insert(self.tempfiles, tempfile)
     return tempfile
 end
@@ -278,15 +344,47 @@ function GnuplotPlot:buildGnuplotCommands()
     if #self.series > 0 then
         local plotParts = {}
         for i, series in ipairs(self.series) do
-            local seriesOptions = AttributeMapping:processSeriesOptions(series.options)
-            -- All series use temp files (DATA_INLINE_THRESHOLD = 0)
-            print(string.format("PLOTSERVER: Building plot command for series %d, datafile='%s'", i, series.datafile or "NIL"))
-            table.insert(plotParts, string.format("'%s' using 1:2 %s",
-                                                 series.datafile, seriesOptions))
+            -- Merge plot-level DS_MODE/DS_LEGEND into series options if not already set
+            local effectiveOptions = {}
+            for k, v in pairs(series.options) do
+                effectiveOptions[k] = v
+            end
+
+            -- Apply plot-level DS_MODE as fallback
+            if not effectiveOptions.DS_MODE and self.attributes.DS_MODE then
+                effectiveOptions.DS_MODE = self.attributes.DS_MODE
+                --[[io.write(string.format("PLOTSERVER: Using plot-level DS_MODE='%s' for series %d\n",
+                                       self.attributes.DS_MODE, i))
+                io.flush()]]
+            end
+
+            -- Apply plot-level DS_LEGEND as fallback
+            if not effectiveOptions.DS_LEGEND and self.attributes.DS_LEGEND then
+                effectiveOptions.DS_LEGEND = self.attributes.DS_LEGEND
+            end
+
+            local seriesOptions = AttributeMapping:processSeriesOptions(effectiveOptions)
+
+            -- Use datablock if available, otherwise use temp file
+            local data_source
+            if series.datablock_name then
+                data_source = series.datablock_name
+                --[[io.write(string.format("PLOTSERVER: Building plot command for series %d, using data block '%s'\n",
+                                       i, data_source))]]
+            else
+                data_source = string.format("'%s'", series.datafile)
+                --[[io.write(string.format("PLOTSERVER: Building plot command for series %d, using temp file '%s'\n",
+                                       i, series.datafile or "NIL"))]]
+            end
+            --io.flush()
+
+            table.insert(plotParts, string.format("%s using 1:2 %s",
+                                                 data_source, seriesOptions))
         end
 
         local plotCmd = "plot " .. table.concat(plotParts, ", ")
-        print(string.format("PLOTSERVER: Final plot command: %s", plotCmd))
+        --[[io.write(string.format("PLOTSERVER: Final plot command: %s\n", plotCmd))
+        io.flush()]]
         table.insert(commands, plotCmd)
     end
 
@@ -297,19 +395,19 @@ end
 -- Queue commands to wxgnuplot (only call this when data changes!)
 function GnuplotPlot:queueCommandsToWxgnuplot()
     if not self.wxplot then
-        io.write("PLOTSERVER: ERROR - wxgnuplot widget not initialized\n")
+        --io.write("PLOTSERVER: ERROR - wxgnuplot widget not initialized\n")
         return false
     end
 
     if not self.gnuplot_commands then
-        io.write("PLOTSERVER: ERROR - No cached gnuplot commands to queue\n")
+        --io.write("PLOTSERVER: ERROR - No cached gnuplot commands to queue\n")
         return false
     end
 
-    io.write("PLOTSERVER: gnuplot_commands table:\n")
+    --[[io.write("PLOTSERVER: gnuplot_commands table:\n")
     for i, cmd in ipairs(self.gnuplot_commands) do
         io.write(string.format("  [%d]: %s\n", i, cmd))
-    end
+    end]]
 
     -- Clear previous commands
     self.wxplot:clear()
@@ -322,43 +420,43 @@ function GnuplotPlot:queueCommandsToWxgnuplot()
         self.wxplot:cmd(cmd)
     end
 
-    io.write(string.format("PLOTSERVER: Queued %d commands to wxgnuplot (including reset)\n", #self.gnuplot_commands + 1))
+    --io.write(string.format("PLOTSERVER: Queued %d commands to wxgnuplot (including reset)\n", #self.gnuplot_commands + 1))
     return true
 end
 
 -- Build commands and queue to wxgnuplot (main entry point)
 function GnuplotPlot:render()
-    io.write("PLOTSERVER: render() - building commands...\n")
+    --io.write("PLOTSERVER: render() - building commands...\n")
 
     -- Build gnuplot command list
     self:buildGnuplotCommands()
 
-    io.write("PLOTSERVER: render() - queuing commands to wxgnuplot...\n")
+    --io.write("PLOTSERVER: render() - queuing commands to wxgnuplot...\n")
     -- Queue commands to wxgnuplot
     self:queueCommandsToWxgnuplot()
 
-    io.write("PLOTSERVER: render() - calling wxplot:execute()...\n")
+    --io.write("PLOTSERVER: render() - calling wxplot:execute()...\n")
     -- Execute ONCE (wxgnuplot will handle resize automatically from here)
     local success, err = self.wxplot:execute()
 
     if not success then
-        io.write("PLOTSERVER: ERROR - wxgnuplot execute failed: " .. tostring(err) .. "\n")
+        --io.write("PLOTSERVER: ERROR - wxgnuplot execute failed: " .. tostring(err) .. "\n")
         return false
     end
 
-    io.write("PLOTSERVER: render() - execute succeeded!\n")
+    --io.write("PLOTSERVER: render() - execute succeeded!\n")
     return true
 end
 
 -- Cleanup temp files
 function GnuplotPlot:cleanup()
-    io.write("PLOTSERVER: GnuplotPlot:cleanup() called\n")
+    --io.write("PLOTSERVER: GnuplotPlot:cleanup() called\n")
     for _, tempfile in ipairs(self.tempfiles) do
-        io.write("PLOTSERVER: Removing temp file: " .. tempfile .. "\n")
+        --io.write("PLOTSERVER: Removing temp file: " .. tempfile .. "\n")
         os.remove(tempfile)
     end
     self.tempfiles = {}
-    io.write("PLOTSERVER: cleanup() completed\n")
+    --io.write("PLOTSERVER: cleanup() completed\n")
 end
 
 local client
@@ -373,9 +471,19 @@ local exitProg = false
 -- ============================================================================
 
 local function connectParent()
+    --[[io.write("PLOTSERVER: connectParent() - Requiring socket...\n")
+    io.flush()]]
     local socket = require("socket")
+    --[[io.write("PLOTSERVER: connectParent() - Connecting to localhost:", tostring(parentPort), "\n")
+    io.flush()]]
     local c, msg = socket.connect("localhost", parentPort)
-    if not c then return nil end
+    if not c then
+        --[[io.write("PLOTSERVER: connectParent() - FAILED to connect: ", tostring(msg), "\n")
+        io.flush()]]
+        return nil
+    end
+    --[[io.write("PLOTSERVER: connectParent() - Connected successfully!\n")
+    io.flush()]]
     c:settimeout(0.01)
     client = c
     return true
@@ -407,11 +515,13 @@ local function window(tbl)
             local panel = wx.wxPanel(winObj.frame, wx.wxID_ANY)
             panel.slotSizer = wx.wxBoxSizer(wx.wxVERTICAL)
             panel:SetSizer(panel.slotSizer)
-            winObj.sizers[i]:Add(panel, 1, wx.wxEXPAND + wx.wxALL, 5)
+            -- Use 0 padding to match single-plot appearance
+            winObj.sizers[i]:Add(panel, 1, wx.wxEXPAND + wx.wxALL, 0)
             winObj.slots[i][j] = {panel = panel, plot = nil}
         end
 
-        mainSizer:Add(winObj.sizers[i], 1, wx.wxEXPAND + wx.wxALL, 5)
+        -- Use 0 padding to match single-plot appearance
+        mainSizer:Add(winObj.sizers[i], 1, wx.wxEXPAND + wx.wxALL, 0)
     end
 
     winObj.frame:SetSizer(mainSizer)
@@ -512,9 +622,9 @@ local function setupTimer(app)
 
 			-- Receive message
 			local msg, err = client:receive("*l")
-			if msg then
+			--[[if msg then
 				io.write("PLOTSERVER: Received message: " .. msg .. "\n")
-			end
+			end]]
 			
 			if err == "closed" then
                 exitProg = true
@@ -583,12 +693,12 @@ local function setupTimer(app)
 					end
 
 				elseif msg[1] == "SHOW PLOT" then
-					io.write("PLOTSERVER: Processing SHOW PLOT for plot " .. tostring(msg[2]) .. "\n")
+					--io.write("PLOTSERVER: Processing SHOW PLOT for plot " .. tostring(msg[2]) .. "\n")
 					if managedPlots[msg[2]] then
 						local plot = managedPlots[msg[2]]
 
 						if not plot2Dialog[plot] then
-							io.write("PLOTSERVER: Creating new dialog frame...\n")
+							--io.write("PLOTSERVER: Creating new dialog frame...\n")
 							local opts = msg[3] or {}
 							local dlg = wx.wxFrame(wx.NULL, wx.wxID_ANY,
 								opts.title or "Plot",
@@ -617,17 +727,17 @@ local function setupTimer(app)
 							plot2Dialog[plot] = dlg
 						end
 
-						io.write("PLOTSERVER: Calling render()...\n")
+						--io.write("PLOTSERVER: Calling render()...\n")
 						plot:render()
-						io.write("PLOTSERVER: Calling Show() directly...\n")
+						--io.write("PLOTSERVER: Calling Show() directly...\n")
 						plot2Dialog[plot]:Show(true)
-						io.write("PLOTSERVER: Calling Raise() to bring window to front...\n")
+						--io.write("PLOTSERVER: Calling Raise() to bring window to front...\n")
 						plot2Dialog[plot]:Raise()
-						io.write("PLOTSERVER: Show() and Raise() completed\n")
-						io.write("PLOTSERVER: Sending ACKNOWLEDGE\n")
+						--io.write("PLOTSERVER: Show() and Raise() completed\n")
+						--io.write("PLOTSERVER: Sending ACKNOWLEDGE\n")
 						sendMSG([[{"ACKNOWLEDGE"}]] .. "\n")
 					else
-						io.write("PLOTSERVER: ERROR - Plot not found\n")
+						--io.write("PLOTSERVER: ERROR - Plot not found\n")
 						sendMSG([[{"ERROR","No Plot present at that index"}]] .. "\n")
 					end
 
@@ -648,18 +758,18 @@ local function setupTimer(app)
 					end
 
 				elseif msg[1] == "DESTROY" then
-					io.write("PLOTSERVER: DESTROY request for plot " .. tostring(msg[2]) .. "\n")
+					--io.write("PLOTSERVER: DESTROY request for plot " .. tostring(msg[2]) .. "\n")
 					if managedPlots[msg[2]] then
-						io.write("PLOTSERVER: Adding plot to destroy queue\n")
+						--io.write("PLOTSERVER: Adding plot to destroy queue\n")
 						table.insert(destroyQ, managedPlots[msg[2]])
 						sendMSG([[{"ACKNOWLEDGE"}]] .. "\n")
 					else
-						io.write("PLOTSERVER: ERROR - Plot not found for destruction\n")
+						--io.write("PLOTSERVER: ERROR - Plot not found for destruction\n")
 						sendMSG([[{"ERROR","No Plot present at that index"}]] .. "\n")
 					end
 
 				elseif msg[1] == "LIST PLOTS" then
-					io.write("PLOTSERVER: Managed Plots:\n")
+					--[[io.write("PLOTSERVER: Managed Plots:\n")
 					for k, v in pairs(managedPlots) do
 						io.write("  " .. tostring(k) .. " = " .. tostring(v) .. "\n")
 					end
@@ -670,7 +780,7 @@ local function setupTimer(app)
 					io.write("PLOTSERVER: Managed Windows:\n")
 					for k, v in pairs(managedWindows) do
 						io.write("  " .. tostring(k) .. " = " .. tostring(v) .. "\n")
-					end
+					end]]
 
 				elseif msg[1] == "WINDOW" then
 					local i = 1
@@ -757,10 +867,31 @@ end
 -- Main Execution
 -- ============================================================================
 
+--[[io.write("PLOTSERVER: Main execution - calling connectParent()...\n")
+io.flush()]]
+
 if not connectParent() then
-    print("PLOTSERVER: Could not connect to parent")
+    --[[io.write("PLOTSERVER: Could not connect to parent\n")
+    io.flush()]]
     os.exit(1)
 end
+
+--[[io.write("PLOTSERVER: Connected to parent successfully\n")
+io.flush()
+
+-- Initialize wxgnuplot (required for set_datablock to work)
+io.write("PLOTSERVER: Initializing wxgnuplot...\n")
+io.flush()]]
+if wxgnuplot.init() then
+    --[[io.write("PLOTSERVER: wxgnuplot initialized successfully\n")
+    io.flush()]]
+else
+    --[[io.write("PLOTSERVER: WARNING - wxgnuplot.init() failed\n")
+    io.flush()]]
+end
+
+--[[io.write("PLOTSERVER: Starting wx app...\n")
+io.flush()]]
 
 app = wx.wxApp()  -- Make app global to ensure it stays alive
 mainTimer = setupTimer(app)  -- Make mainTimer global too

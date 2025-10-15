@@ -20,10 +20,11 @@ local loadstring = loadstring
 local load = load
 
 local os = os
+local io = io
 
 -- Set this to nil to use Lua Lanes to launch plotserver as a thread
 -- Set to true to use process mode (recommended for wxWidgets/gnuplot)
-local USE_PROCESS = nil  -- Try Lua Lanes with proper configuration
+local USE_PROCESS = true  -- Use process mode to avoid wxWidgets threading issues
 
 -- Set USE_GNUPLOT to true to use gnuplot backend instead of MathGL
 -- The gnuplot backend provides more plotting capabilities and better extensibility
@@ -36,10 +37,10 @@ if not USE_PROCESS then
     if ok then
         -- Configure lanes properly
         lanes = lanes_module.configure()
-        print("PLOT: Lua Lanes configured successfully")
+        --print("PLOT: Lua Lanes configured successfully")
     else
-        print("PLOT: ERROR - Lua Lanes not found:", lanes_module)
-        print("PLOT: Falling back to process mode")
+        --print("PLOT: ERROR - Lua Lanes not found:", lanes_module)
+        --print("PLOT: Falling back to process mode")
         USE_PROCESS = true
     end
 end
@@ -178,14 +179,18 @@ local server,stat,conn
 server = socket.bind("*",port)
 if not server then
 	-- Try the next 100 ports
+	local original_port = port
+	--print("PLOT: Port " .. port .. " in use, searching for available port...")
 	while not server and port<6348+100 do
 		port = port + 1
 		server = socket.bind("*",port)
 	end
 	if not server then
+		--print("PLOT: ERROR - Could not find available port in range " .. original_port .. "-" .. (original_port + 100))
 		package.loaded[modname] = nil
 		return	-- exit module without loading it
 	end
+	--print("PLOT: Using port " .. port)
 end
 --print("PLOT: Starting plotserver by passing port number=",port)
 local plotserver
@@ -245,49 +250,76 @@ if not USE_PROCESS then
 
 	-- Create and start the lane
 	-- Use "*" to load all standard libraries
-	print("PLOT: Creating lane generator...")
+	--print("PLOT: Creating lane generator...")
 	local lane_gen = lanes.gen("*", lane_func)
-	print("PLOT: Starting lane with port", port)
+	--print("PLOT: Starting lane with port", port)
 	plotserver = lane_gen(port, CHUNKED_LIMIT, args[2], USE_GNUPLOT)
 
 	if not plotserver then
-		print("PLOT: ERROR - Could not start plotserver lane")
+		--print("PLOT: ERROR - Could not start plotserver lane")
 		-- Could not start the plotserver as a new lane
 		package.loaded[modname] = nil
 		return	-- exit module without loading it
 	end
-	print("PLOT: Lane started successfully")
+	--print("PLOT: Lane started successfully")
 
 	-- Check lane status after a short delay to see if it crashed
 	local socket_for_sleep = require("socket")
 	socket_for_sleep.sleep(0.1)
 	local status = plotserver.status
-	print("PLOT: Lane status:", status)
+	--print("PLOT: Lane status:", status)
 	if status == "error" then
 		-- Try to get error details using lanes API
 		local ok, err_msg = pcall(function() return plotserver:join(0) end)
-		if not ok then
+		--[[if not ok then
 			print("PLOT: Lane error (couldn't retrieve):", err_msg)
 		else
 			print("PLOT: Lane error:", err_msg)
-		end
+		end]]
 	end
 else
 	-- Launch plotserver as a separate process
-	local plotserver_path = args[2]:gsub("lua%-plot%.lua$", "lua-plot/plotserver-gnuplot.lua")
-	local lua_cmd = "lua"
-	-- Build command with environment variables
-	local cmd = string.format(
-		"parentPort=%d CHUNKED_LIMIT=%d MODPATH='%s' USE_GNUPLOT=%s %s '%s' &",
-		port, CHUNKED_LIMIT, args[2], tostring(USE_GNUPLOT), lua_cmd, plotserver_path
-	)
-	print("PLOT: Launching plotserver process:", cmd)
-	local ok = os.execute(cmd)
-	if not ok then
-		print("PLOT: ERROR - Failed to launch plotserver process")
-		package.loaded[modname] = nil
-		return
+	local plotserver_path
+	if USE_GNUPLOT then
+		plotserver_path = args[2]:gsub("lua%-plot%.lua$", "lua-plot/plotserver-gnuplot.lua")
+	else
+		plotserver_path = args[2]:gsub("lua%-plot%.lua$", "lua-plot/plotserver.lua")
 	end
+
+	-- Detect platform
+	local is_windows = package.config:sub(1,1) == '\\'
+
+	-- Build the command with arguments
+	-- Arguments: port, CHUNKED_LIMIT, MODPATH, USE_GNUPLOT
+	local lua_cmd = "lua"
+	local cmd
+
+	if is_windows then
+		-- Windows: Use start /B to launch in background
+		-- Need to ensure paths are inherited from current environment
+		cmd = string.format('start /B "" lua "%s" %d %d "%s" %s',
+			plotserver_path, port, CHUNKED_LIMIT, args[2], tostring(USE_GNUPLOT))
+		--print("PLOT: Launching plotserver process:", cmd)
+		os.execute(cmd)
+	else
+		-- Unix/Linux: Use & to launch in background
+		-- Need to set LD_LIBRARY_PATH for gnuplot
+		local env_prefix = ""
+		if USE_GNUPLOT then
+			local home = os.getenv("HOME") or "/home/aryajur"
+			local current_ld = os.getenv("LD_LIBRARY_PATH") or ""
+			if current_ld ~= "" then
+				env_prefix = string.format("LD_LIBRARY_PATH=%s/Lua:%s ", home, current_ld)
+			else
+				env_prefix = string.format("LD_LIBRARY_PATH=%s/Lua ", home)
+			end
+		end
+		cmd = string.format("%slua '%s' %d %d '%s' %s &",
+			env_prefix, plotserver_path, port, CHUNKED_LIMIT, args[2], tostring(USE_GNUPLOT))
+		--print("PLOT: Launching plotserver process:", cmd)
+		os.execute(cmd)
+	end
+	--print("PLOT: Process launched successfully")
 end
 
 -- Now wait for the connection
@@ -297,15 +329,15 @@ if USE_PROCESS then
 else
 	server:settimeout(10)
 end
-print("Waiting for server to connect...")
+--print("Waiting for server to connect...")
 local conn, err = server:accept()
-print("Connection object is ", conn)
-if err then
+--print("Connection object is ", conn)
+--[[if err then
 	print("Connection error:", err)
-end
+end]]
 if not conn then
 	-- Did not get connection
-	print("PLOT: ERROR - Plotserver did not connect within timeout")
+	--print("PLOT: ERROR - Plotserver did not connect within timeout")
 	package.loaded[modname] = nil
 	return
 end
@@ -887,8 +919,8 @@ function bodePlot(tbl)
 	-- AXS_BOUNDS takes xmin,ymin,xmax,ymax
 	local magPlot = plot {TITLE = "Magnitude", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, magmin-20,finfreq,magmax+20}}
 	local phasePlot = plot {TITLE = "Phase", GRID="YES", GRIDLINESTYLE = "DOTTED", AXS_XSCALE="LOG10", AXS_BOUNDS={tbl.ini or 0.01, phasemin-10,finfreq,phasemax+10}}
-	magPlot:AddSeries(mag)
-	phasePlot:AddSeries(phase)
+	magPlot:AddSeries(mag,{DS_MODE="LINE"})
+	phasePlot:AddSeries(phase,{DS_MODE="LINE"})
 	if tbl.legend then
 		magPlot:Attributes{DS_LEGEND = tbl.legend}
 		phasePlot:Attributes{DS_LEGEND = tbl.legend}
@@ -924,8 +956,8 @@ function bodePlot(tbl)
 			bp.mag:AddSeries(mag)
 			bp.phase:AddSeries(phase)
 			if legend then
-				bp.mag:Attributes{DS_LEGEND = legend,AXS_XAUTOMIN="YES", AXS_XAUTOMAX="YES", AXS_YAUTOMIN="YES", AXS_YAUTOMAX="YES"}
-				bp.phase:Attributes{DS_LEGEND = legend,AXS_XAUTOMIN="YES", AXS_XAUTOMAX="YES", AXS_YAUTOMIN="YES", AXS_YAUTOMAX="YES"}
+				bp.mag:Attributes{DS_LEGEND = legend,AXS_XAUTOMIN="YES", AXS_XAUTOMAX="YES", AXS_YAUTOMIN="YES", AXS_YAUTOMAX="YES",DS_MODE="LINE"}
+				bp.phase:Attributes{DS_LEGEND = legend,AXS_XAUTOMIN="YES", AXS_XAUTOMAX="YES", AXS_YAUTOMIN="YES", AXS_YAUTOMAX="YES",DS_MODE="LINE"}
 			end
 		end
 	}

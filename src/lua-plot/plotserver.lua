@@ -435,6 +435,7 @@ local function setupTimer(app)
 	end
 
 	app:Connect(ID_TIMER, wx.wxEVT_TIMER, function(event)
+		print("PLOTSERVER: timer fired")
 		-- Stop timer to prevent reentrancy
 		timer:Stop()
 
